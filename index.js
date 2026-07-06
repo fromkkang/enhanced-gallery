@@ -14,16 +14,16 @@ const template = `
 
     <div id="adv-gallery-controls">
         <div style="font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px;">
-            💬 현재 채팅 갤러리
+            🖼️
         </div>
         
         <select class="adv-ctrl-item" id="adv-sort-select" title="정렬">
-            <option value="newest">🕒 최신순</option>
-            <option value="oldest">⏳ 오래된순</option>
+            <option value="newest">최신순</option>
+            <option value="oldest">오래된순</option>
         </select>
         
         <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수">
-            <option value="4">🔲 4장 보기</option><option value="8" selected>🔲 8장 보기</option><option value="20">🔲 20장 보기</option>
+            <option value="4">4장 보기</option><option value="8" selected>8장 보기</option><option value="20">20장 보기</option>
         </select>
         
         <div style="margin-left:auto; display:flex; gap:8px;">
@@ -157,7 +157,21 @@ function renderGrid() {
         // CSS 클래스를 부여하여 style.css에서 크기 등 제어
         favBtn.className = `adv-btn-fav ${favoriteImages.has(src) ? 'active' : ''}`;
         favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
+         favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white'; 
         
+        favBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (favoriteImages.has(src)) favoriteImages.delete(src); 
+            else favoriteImages.add(src);
+            
+            localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
+            favBtn.classList.toggle('active');
+            favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
+            
+            // ★ 추가 2: 클릭할 때마다 노란색 <-> 흰색 왔다갔다 변경
+            favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white'; 
+        };
         // 1. 즐겨찾기 버튼 안 눌림 방지 (이벤트 버블링 차단)
         favBtn.onclick = (e) => {
             e.preventDefault();
