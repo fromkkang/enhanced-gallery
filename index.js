@@ -12,7 +12,7 @@ const template = `
     <div id="adv-gallery-controls" style="display:flex; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--SmartThemeBorderColor, #444); background:rgba(0,0,0,0.2); overflow-x:auto; flex-shrink:0; white-space:nowrap;">
         
         <select class="adv-ctrl-item" id="adv-char-select" title="캐릭터 선택" style="padding:5px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:1px solid #555;">
-            <option value="">👤 캐릭터 선택</option>
+            <option value="">데이터 분석 중...</option>
         </select>
         <span id="adv-char-size" style="font-size:12px; opacity:0.6; padding-right:5px;"></span>
         
@@ -58,8 +58,9 @@ const template = `
 </div>
 `;
 
-window.advGalleryCache = {};
+window.advGalleryFolderMap = {}; // 폴더별 이미지를 캐싱할 객체
 
+// 1. 메뉴 버튼 추가
 function addWandMenuButtons() {
     var menu = document.getElementById('extensionsMenu');
     if (!menu) return;
@@ -70,254 +71,124 @@ function addWandMenuButtons() {
         btn.className = 'list-group-item flex-container flexGap5';
         btn.innerHTML = '<div class="fa-solid fa-images extensionsMenuExtensionButton" style="color:#ff4081;"></div><span>갤러리</span>';
 
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', async function () {
             document.getElementById('adv-gallery-popup').style.display = 'flex';
             document.getElementById('extensionsMenuButton')?.click();
-            populateCharacters(); // 열 때마다 캐릭터 목록 갱신
+            await fetchGlobalImagesAndFilterChars(); // 열 때마다 최신 목록 스캔
         });
         menu.appendChild(btn);
     }
 }
 
-// 렉 없는 캐릭터 목록 구성 (최근 대화 순)
-function populateCharacters() {
+// 2. ★ 핵심: 렉 없이 파일 스캔 + 이미지가 있는 캐릭터만 + 최신순 정렬
+async function fetchGlobalImagesAndFilterChars() {
     const select = document.getElementById('adv-char-select');
-    select.innerHTML = '<option value="">👤 캐릭터 선택</option>';
-    const context = getContext();
-    
-    if (context.characters) {
-        // 이미 실리태번은 characters 배열을 최근 대화순으로 정렬해둠
-        context.characters.forEach(c => {
-            select.innerHTML += `<option value="${c.avatar}" data-name="${c.name}">${c.name}</option>`;
-        });
-    }
-}
+    select.innerHTML = '<option value="">데이터 수집 중...</option>';
 
-// ★ 핵심: 서버의 Native API를 이용한 0초 다이렉트 폴더 스캔
-async function loadAndSortImages(avatarName) {
-    document.getElementById('adv-char-size').innerText = '';
-    const container = document.getElementById('adv-gallery-container');
-    
-    if (!avatarName) { 
-        currentImages = []; 
-        applySortAndRender(); 
-        return; 
-    }
-
-    // 이미 불러온 폴더면 메모리에서 즉시 호출 (0.001초)
-    if (window.advGalleryCache && window.advGalleryCache[avatarName]) {
-        currentImages = [...window.advGalleryCache[avatarName]];
-        applySortAndRender();
-        return;
-    }
-
-    container.innerHTML = '<p style="text-align:center; padding-top:40px; width:100%; grid-column:1/-1; color:#aaa;">폴더를 읽는 중입니다...</p>';
-    
-    const context = getContext();
-    const selectEl = document.getElementById('adv-char-select');
-    const charName = selectEl.options[selectEl.selectedIndex].getAttribute('data-name');
-    
     try {
-        // 실리태번의 순정 API 규격: 캐릭터 이름과 아바타를 주면 폴더 내용물 배열을 반환함
-        const res = await fetch('/api/images/get', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': context.csrf_token },
-            body: JSON.stringify({ avatar: avatarName, ch_name: charName })
-        });
+        // 실리태번의 갤러리 이미지 전체 경로를 가져오는 진짜 GET API 호출
+        const res = await fetch('/api/images/get', { method: 'GET' });
+        if (!res.ok) throw new Error("이미지 목록을 불러오지 못했습니다.");
         
-        if (res.ok) {
-            const data = await res.json();
-            currentImages = Array.isArray(data) ? data : (data.images || []);
-        } else {
-            currentImages = [];
-        }
-    } catch (e) {
-        console.error("폴더 읽기 오류:", e);
-        currentImages = [];
-    }
+        const data = await res.json();
+        const allPaths = Array.isArray(data) ? data : (data.images || []);
 
-    if (currentImages.length === 0) {
-        container.innerHTML = '<p style="text-align:center; padding-top:40px; width:100%; grid-column:1/-1; color:#aaa;">이 캐릭터 폴더에 저장된 이미지가 없습니다.</p>';
+        window.advGalleryFolderMap = {};
+        let folderLastSeenIndex = {}; // 어떤 폴더에 이미지가 가장 마지막에(최근에) 저장되었는지 기록
+
+        // 1) 전체 경로를 분석해서 폴더명(캐릭터명)별로 이미지를 분류
+        allPaths.forEach((path, index) => {
+            if (typeof path !== 'string') return;
+            const normalizedPath = path.replace(/\\/g, '/');
+            
+            // 정규식: /images/ 뒤에 나오는 폴더명 추출
+            const match = normalizedPath.match(/\/images\/([^/]+)\//i);
+            if (match) {
+                const folderName = match[1];
+                if (!window.advGalleryFolderMap[folderName]) {
+                    window.advGalleryFolderMap[folderName] = [];
+                }
+                window.advGalleryFolderMap[folderName].push(path);
+                // 배열의 뒤로 갈수록 최신 이미지이므로 index 덮어쓰기
+                folderLastSeenIndex[folderName] = index; 
+            }
+        });
+
+        // 2) 실리태번에 등록된 캐릭터와 폴더명 매칭
+        const context = getContext();
+        let validChars = []; // 이미지가 존재하는 캐릭터만 담을 배열
+
+        if (context.characters) {
+            const availableFolders = Object.keys(window.advGalleryFolderMap);
+
+            context.characters.forEach(c => {
+                const charName = c.name || "";
+                const avatarBase = (c.avatar || "").replace(/\.[^/.]+$/, "");
+
+                // 폴더 이름이 캐릭터 이름이나 아바타 파일명과 일치하는지 확인 (대소문자 무시)
+                const matchedFolder = availableFolders.find(f => 
+                    f.toLowerCase() === charName.toLowerCase() || 
+                    f.toLowerCase() === avatarBase.toLowerCase()
+                );
+
+                if (matchedFolder) {
+                    validChars.push({
+                        name: charName,
+                        folder: matchedFolder,
+                        lastIndex: folderLastSeenIndex[matchedFolder] // 정렬용 점수
+                    });
+                }
+            });
+        }
+
+        // 3) 최신순 정렬 (최근에 이미지가 추가된 캐릭터가 맨 위로)
+        validChars.sort((a, b) => b.lastIndex - a.lastIndex);
+
+        // 4) 드롭다운 메뉴 렌더링
+        if (validChars.length === 0) {
+            select.innerHTML = '<option value="">이미지가 있는 캐릭터가 없습니다</option>';
+            currentImages = [];
+            renderGrid();
+            return;
+        }
+
+        select.innerHTML = '<option value="">👤 캐릭터 선택</option>';
+        validChars.forEach(c => {
+            select.innerHTML += `<option value="${c.folder}">${c.name}</option>`;
+        });
+
+    } catch (e) {
+        console.error("갤러리 스캔 오류:", e);
+        select.innerHTML = '<option value="">오류 발생 (F12 콘솔 확인)</option>';
+    }
+}
+
+// 3. 캐릭터 선택 시 메모리(캐시)에서 이미지 즉시 렌더링
+function loadAndSortImages(folderName) {
+    document.getElementById('adv-char-size').innerText = '';
+    
+    if (!folderName || !window.advGalleryFolderMap[folderName]) {
+        currentImages = [];
+        renderGrid();
         return;
     }
 
-    // 캐싱 저장
-    if (!window.advGalleryCache) window.advGalleryCache = {};
-    window.advGalleryCache[avatarName] = [...currentImages];
-
-    applySortAndRender();
-}
-
-function applySortAndRender() {
+    // 캐싱된 배열 가져오기
+    currentImages = [...window.advGalleryFolderMap[folderName]];
+    
     const sortType = document.getElementById('adv-sort-select').value;
     
-    // 서버가 기본적으로 오래된 순으로 주므로, 최신순은 배열을 뒤집기만 하면 됨
+    // 서버가 주는 원본이 오래된순(oldest)이므로, 최신순은 reverse만 하면 됨
     if (sortType === 'newest') currentImages.reverse();
-    else if (sortType === 'oldest') currentImages.sort();
+    else if (sortType === 'oldest') { /* 유지 */ }
     else if (sortType === 'size') currentImages.sort((a, b) => b.length - a.length);
 
     currentPage = 1;
-    selectedImages.clear();
-    document.getElementById('adv-sel-count').innerText = '0';
-    
+    resetSelection();
     renderGrid();
     calculateTotalSize(currentImages);
 }
 
-// 화면 렌더링
+// 화면 그리기
 function renderGrid() {
     const container = document.getElementById('adv-gallery-container');
-    if(!currentImages || currentImages.length === 0) return;
-    
-    container.innerHTML = '';
-    container.style.setProperty('--columns', itemsPerPage == 4 ? 2 : (itemsPerPage == 8 ? 4 : 6));
-
-    const totalPages = Math.ceil(currentImages.length / itemsPerPage) || 1;
-    document.getElementById('adv-page-info').textContent = `${currentPage} / ${totalPages}`;
-
-    const startIdx = (currentPage - 1) * itemsPerPage;
-    const pageImages = currentImages.slice(startIdx, startIdx + itemsPerPage);
-
-    pageImages.forEach((src, idx) => {
-        const card = document.createElement('div');
-        card.style.cssText = `position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; background:rgba(0,0,0,0.3); cursor:pointer; transition:transform 0.1s; border: 2px solid ${selectedImages.has(src) ? '#ff4081' : 'transparent'};`;
-        card.onmouseover = () => card.style.transform = 'scale(1.03)';
-        card.onmouseout = () => card.style.transform = 'scale(1)';
-
-        const favBtn = document.createElement('button');
-        favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
-        favBtn.style.cssText = `position:absolute; top:5px; left:5px; width:28px; height:28px; background:rgba(0,0,0,0.5); border:none; border-radius:50%; color:${favoriteImages.has(src) ? '#ffd54f' : 'white'}; cursor:pointer; z-index:10; font-size:12px;`;
-        
-        favBtn.onclick = (e) => {
-            e.stopPropagation();
-            if (favoriteImages.has(src)) favoriteImages.delete(src); else favoriteImages.add(src);
-            localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
-            favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
-            favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white';
-        };
-
-        const img = document.createElement('img');
-        img.src = src;
-        img.style.cssText = "width:100%; height:100%; object-fit:cover;";
-        
-        card.appendChild(favBtn);
-        card.appendChild(img);
-
-        if(selectedImages.has(src)) {
-            const check = document.createElement('div');
-            check.innerHTML = '<i class="fa-solid fa-check"></i>';
-            check.style.cssText = 'position:absolute; top:5px; right:5px; width:24px; height:24px; background:#ff4081; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px;';
-            card.appendChild(check);
-        }
-
-        card.onclick = () => {
-            if (isSelectMode) {
-                if (selectedImages.has(src)) selectedImages.delete(src); else selectedImages.add(src);
-                document.getElementById('adv-sel-count').innerText = selectedImages.size;
-                renderGrid(); 
-            } else {
-                currentLightboxIndex = startIdx + idx;
-                document.getElementById('adv-lightbox-img').src = src;
-                document.getElementById('adv-lightbox').style.display = 'flex';
-            }
-        };
-        container.appendChild(card);
-    });
-}
-
-// 용량 계산
-async function calculateTotalSize(images) {
-    const sizeSpan = document.getElementById('adv-char-size');
-    if (images.length === 0) { sizeSpan.innerText = '(0MB)'; return; }
-
-    sizeSpan.innerText = '(용량 계산 중...)';
-    let totalSize = 0;
-    try {
-        for (let i = 0; i < images.length; i += 20) {
-            const chunk = images.slice(i, i + 20);
-            await Promise.all(chunk.map(async (src) => {
-                try {
-                    const res = await fetch(src, { method: 'HEAD' });
-                    const size = res.headers.get('content-length');
-                    if (size) totalSize += parseInt(size, 10);
-                } catch(e) {}
-            }));
-        }
-        sizeSpan.innerText = `(${(totalSize / (1024 * 1024)).toFixed(2)}MB)`;
-    } catch(e) { sizeSpan.innerText = '(계산 실패)'; }
-}
-
-// 각종 버튼 이벤트
-function bindEvents() {
-    document.getElementById('adv-btn-close').onclick = () => document.getElementById('adv-gallery-popup').style.display = 'none';
-
-    document.getElementById('adv-char-select').onchange = (e) => loadAndSortImages(e.target.value);
-    document.getElementById('adv-sort-select').onchange = () => applySortAndRender();
-    document.getElementById('adv-grid-select').onchange = (e) => { itemsPerPage = parseInt(e.target.value); renderGrid(); };
-
-    document.getElementById('adv-btn-prev-page').onclick = () => { if(currentPage > 1) { currentPage--; renderGrid(); } };
-    document.getElementById('adv-btn-next-page').onclick = () => { if(currentPage < Math.ceil(currentImages.length/itemsPerPage)) { currentPage++; renderGrid(); } };
-
-    document.getElementById('adv-btn-select').onclick = (e) => {
-        isSelectMode = !isSelectMode;
-        e.currentTarget.style.background = isSelectMode ? 'rgba(255,64,129,0.5)' : 'rgba(255,255,255,0.1)';
-        document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
-        selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0'; renderGrid();
-    };
-
-    document.getElementById('adv-btn-sel-all').onclick = () => {
-        currentImages.forEach(src => selectedImages.add(src));
-        document.getElementById('adv-sel-count').innerText = selectedImages.size; renderGrid();
-    };
-    document.getElementById('adv-btn-del-sel').onclick = () => deleteTargetImages(Array.from(selectedImages));
-    document.getElementById('adv-btn-del-unsel').onclick = () => deleteTargetImages(currentImages.filter(src => !selectedImages.has(src)));
-    document.getElementById('adv-btn-save-sel').onclick = () => {
-        selectedImages.forEach(src => {
-            const a = document.createElement('a'); a.href = src; a.download = src.split('/').pop();
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        });
-    };
-
-    document.getElementById('adv-nav-left').onclick = (e) => { e.stopPropagation(); navLightbox(-1); };
-    document.getElementById('adv-nav-right').onclick = (e) => { e.stopPropagation(); navLightbox(1); };
-    document.getElementById('adv-lightbox').onclick = (e) => { if(e.target.id === 'adv-lightbox') e.target.style.display = 'none'; };
-}
-
-function navLightbox(dir) {
-    currentLightboxIndex += dir;
-    if (currentLightboxIndex < 0) currentLightboxIndex = currentImages.length - 1;
-    if (currentLightboxIndex >= currentImages.length) currentLightboxIndex = 0;
-    document.getElementById('adv-lightbox-img').src = currentImages[currentLightboxIndex];
-}
-
-async function deleteTargetImages(targetArray) {
-    const toDelete = targetArray.filter(src => !favoriteImages.has(src));
-    if (toDelete.length === 0) return alert("삭제할 이미지가 없거나 모두 ⭐ 즐겨찾기로 보호되어 있습니다.");
-
-    if (!confirm(`즐겨찾기된 이미지를 제외한 ${toDelete.length}장을 영구 삭제합니다. 진행할까요?`)) return;
-
-    for (let src of toDelete) {
-        await fetch('/api/images/delete', { 
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': getContext().csrf_token}, 
-            body: JSON.stringify({path: src}) 
-        });
-        
-        currentImages = currentImages.filter(img => img !== src);
-        const currentAvatar = document.getElementById('adv-char-select').value;
-        if(currentAvatar && window.advGalleryCache[currentAvatar]) {
-            window.advGalleryCache[currentAvatar] = window.advGalleryCache[currentAvatar].filter(img => img !== src);
-        }
-    }
-    
-    selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0';
-    renderGrid();
-    calculateTotalSize(currentImages);
-    alert('삭제 완료!');
-}
-
-jQuery(async function () {
-    document.body.insertAdjacentHTML('beforeend', template);
-    addWandMenuButtons();
-    bindEvents();
-});
