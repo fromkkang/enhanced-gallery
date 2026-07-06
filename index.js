@@ -43,7 +43,7 @@ const template = `
     </div>
 </div>
 
-<div id="adv-lightbox">
+<div id="adv-lightbox" style="display:none;">
     <img id="adv-lightbox-img" src="">
     <div id="adv-lightbox-nav">
         <button class="adv-nav-btn" id="adv-nav-left">◀ 이전</button>
