@@ -1,11 +1,25 @@
-import { getContext, extension_settings, saveSettingsDebounced } from '../../../extensions.js';
+// 1. 에러를 뿜게 만들었던 부분을 빼고 딱 2개만 안전하게 가져옵니다.
+import { getContext, extension_settings } from '../../../extensions.js';
 
 let originalImages = []; 
 let currentImages = []; 
 let selectedImages = new Set();
-let favoriteImages = new Set(); // 에러 유발하던 서버 읽기 코드를 밑으로 내리고 비워둠
+let favoriteImages = new Set(); // 안전한 로딩을 위해 일단 비워둠
 let isSelectMode = false;
 let currentPage = 1, itemsPerPage = 8, currentLightboxIndex = 0;
+
+// 2. 서버 저장 기능을 뻗지 않게 안전하게 우회해서 가져옵니다 (서버 저장 연동)
+let safeSaveSettings = () => {
+    localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
+};
+import('../../../../script.js').then(module => {
+    if (module.saveSettingsDebounced) {
+        safeSaveSettings = () => {
+            if (extension_settings) extension_settings.advGalleryFavs = [...favoriteImages];
+            module.saveSettingsDebounced();
+        };
+    }
+}).catch(() => {});
 
 const template = `
 <div id="adv-gallery-popup">
@@ -150,23 +164,23 @@ function renderGrid() {
         favBtn.className = `adv-btn-fav ${favoriteImages.has(src) ? 'active' : ''}`;
         favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
         
-        // 렌더링 시 노란색/흰색 지정
+        // ★ 화면에 그려질 때 노란색/흰색 명확히 칠하기
         favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white'; 
         
         favBtn.onclick = (e) => {
             e.preventDefault();
-            e.stopPropagation();
+            e.stopPropagation(); // 뒤의 사진이 클릭되는 간섭 완벽 차단
+            
             if (favoriteImages.has(src)) favoriteImages.delete(src); 
             else favoriteImages.add(src);
             
-            // 서버 설정(settings.json)에 저장 후 딜레이 저장 적용
-            extension_settings.advGalleryFavs = [...favoriteImages];
-            saveSettingsDebounced();
+            // 안전하게 연결된 서버 저장 함수 호출
+            safeSaveSettings();
 
             favBtn.classList.toggle('active');
             favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
             
-            // 클릭 시 즉각적인 색상 변화 반영
+            // ★ 클릭하는 순간 즉시 노란색 <-> 흰색 토글
             favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white'; 
         };
 
@@ -214,6 +228,7 @@ function bindEvents() {
 
     document.getElementById('adv-btn-select').onclick = (e) => {
         isSelectMode = !isSelectMode;
+        // 선택 모드 활성화 시 블루 테마
         e.currentTarget.style.background = isSelectMode ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
         document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
         selectedImages.clear(); 
@@ -230,6 +245,7 @@ function bindEvents() {
     document.getElementById('adv-btn-del-sel').onclick = () => deleteTargetImages(Array.from(selectedImages));
     
     document.getElementById('adv-btn-del-unsel').onclick = () => {
+        // 즐겨찾기(노란 별)가 안 된 이미지만 걸러서 삭제 목록으로 전달
         const toDelete = currentImages.filter(src => !favoriteImages.has(src));
         deleteTargetImages(toDelete);
     };
@@ -261,7 +277,7 @@ function navLightbox(dir) {
 async function deleteTargetImages(targetArray) {
     if (targetArray.length === 0) return alert("삭제 대상 이미지가 없습니다.\n(모두 즐겨찾기로 보호되어 있을 수 있습니다.)");
 
-    if (!confirm(`총 ${targetArray.length}장의 이미지를 서버에서 삭제합니다. 진행할까요?`)) return;
+    if (!confirm(`총 ${targetArray.length}장의 이미지를 서버에서 완전히 삭제합니다. 진행할까요?`)) return;
 
     const headers = typeof window.getRequestHeaders === 'function' 
         ? window.getRequestHeaders() 
@@ -269,7 +285,7 @@ async function deleteTargetImages(targetArray) {
 
     for (let src of targetArray) {
         try {
-            // path 대신 url 사용 (실제 서버에서 파일이 삭제되게 고침)
+            // (핵심) 물리 파일이 진짜로 지워지도록 변수명을 url 로 수정
             await fetch('/api/images/delete', { 
                 method: 'POST', 
                 headers: headers, 
@@ -287,17 +303,18 @@ async function deleteTargetImages(targetArray) {
     if (currentPage > totalPages) currentPage = totalPages;
     
     renderGrid();
-    alert('삭제 완료!\n(채팅창의 깨진 엑박을 지우려면 메시지를 새로고침/수정해야 합니다.)');
+    alert('삭제 완료!\n(서버에서 지워졌으므로, 채팅창의 엑박을 치우려면 메시지를 새로고침/수정해야 합니다.)');
 }
 
-// ----------------------------------------------------
-// ★ 여기로 옮겼습니다: 실리태번 로딩이 끝난 안전한 시점에 서버 데이터 불러오기
-// ----------------------------------------------------
+// 스크립트 실행 지점: 실리태번 UI 로딩 후 안전하게 서버 데이터를 끌어옵니다.
 jQuery(function () {
-    if (!extension_settings.advGalleryFavs) {
-        extension_settings.advGalleryFavs = [];
+    let loadedFavs = [];
+    if (extension_settings && extension_settings.advGalleryFavs) {
+        loadedFavs = extension_settings.advGalleryFavs;
+    } else {
+        loadedFavs = JSON.parse(localStorage.getItem('advGalleryFavs')) || [];
     }
-    favoriteImages = new Set(extension_settings.advGalleryFavs);
+    favoriteImages = new Set(loadedFavs);
 
     document.body.insertAdjacentHTML('beforeend', template);
     addWandMenuButtons();
