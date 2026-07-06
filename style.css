@@ -1,82 +1,71 @@
-/* 갤러리 메인 팝업 */
+/* 메인 팝업 */
 #adv-gallery-popup {
-    display: none;
-    position: fixed; top: 5%; left: 5%; width: 90%; height: 90%;
-    background: var(--bg-color, #1a1a1a);
-    border: 2px solid var(--SmartThemeBorderColor, #555);
-    border-radius: 10px; z-index: 2500;
-    display: flex; flex-direction: column;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-    color: var(--SmartThemeBodyColor, #eee);
+    display: none; position: fixed; top: 5%; left: 5%; width: 90%; height: 90%;
+    background: var(--bg-color, #1a1a1a); border: 2px solid var(--SmartThemeBorderColor, #555);
+    border-radius: 10px; z-index: 2500; display: flex; flex-direction: column;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.8); color: var(--SmartThemeBodyColor, #eee);
 }
 
-/* 상단 컨트롤 패널 */
-#adv-gallery-controls {
-    padding: 15px; border-bottom: 1px solid var(--SmartThemeBorderColor, #555);
-    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+/* 상단 컨트롤 패널 (PC/모바일 공통: 가로 스크롤 가능하게) */
+#adv-gallery-controls, #adv-selection-actions {
+    padding: 10px; display: flex; flex-wrap: nowrap; gap: 10px; align-items: center;
+    overflow-x: auto; white-space: nowrap; border-bottom: 1px solid var(--SmartThemeBorderColor, #555);
 }
 
-#adv-gallery-controls select, #adv-gallery-controls button {
-    background: var(--SmartThemeBlurTintColor, #333);
-    color: inherit; border: 1px solid #555; padding: 5px 10px; border-radius: 5px; cursor: pointer;
+/* 컨트롤 요소 디자인 */
+.adv-ctrl-item {
+    background: var(--SmartThemeBlurTintColor, #333); color: inherit;
+    border: 1px solid #555; padding: 8px 12px; border-radius: 5px; cursor: pointer;
+    display: flex; align-items: center; gap: 5px; font-size: 14px;
 }
-#adv-gallery-controls button:hover { background: var(--SmartThemeQuoteColor, #555); }
+.adv-ctrl-item:hover { background: var(--SmartThemeQuoteColor, #555); }
 
-/* 선택 모드 전용 액션 바 (기본 숨김) */
-#adv-selection-actions {
-    display: none; gap: 10px; padding: 10px 15px; background: rgba(255, 64, 129, 0.1);
-    border-bottom: 1px solid #ff4081; align-items: center;
-}
-.btn-danger { background: #d32f2f !important; color: white !important; }
-.btn-success { background: #388e3c !important; color: white !important; }
-.btn-warning { background: #fbc02d !important; color: black !important; }
-
-/* 갤러리 그리드 영역 */
+/* 그리드 */
 #adv-gallery-container {
-    flex-grow: 1; overflow-y: auto; padding: 15px;
-    display: grid; gap: 15px;
-    /* JS에서 설정한 CSS 변수에 따라 열 개수가 바뀜 (요구사항 4) */
-    grid-template-columns: repeat(var(--columns, 4), 1fr); 
+    flex-grow: 1; overflow-y: auto; padding: 15px; display: grid; gap: 15px;
+    grid-template-columns: repeat(var(--columns, 4), 1fr);
 }
 
+/* 이미지 카드 & 즐겨찾기 별모양 */
 .adv-img-card {
-    display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;
-    background: #000; position: relative; transition: transform 0.2s; cursor: pointer;
+    position: relative; border-radius: 8px; overflow: hidden; background: #000;
+    transition: transform 0.2s; cursor: pointer; aspect-ratio: 1/1;
 }
-.adv-img-card:hover { transform: scale(1.02); z-index: 10; }
-.adv-img-card img { width: 100%; aspect-ratio: 1/1; object-fit: cover; }
+.adv-img-card:hover { transform: scale(1.02); }
+.adv-img-card img { width: 100%; height: 100%; object-fit: cover; }
 
-/* 선택 시 효과 */
+.adv-btn-fav {
+    position: absolute; top: 5px; left: 5px; background: rgba(0,0,0,0.5);
+    border: none; border-radius: 50%; width: 30px; height: 30px;
+    font-size: 16px; cursor: pointer; z-index: 10; opacity: 0.7;
+}
+.adv-btn-fav.active { color: gold; text-shadow: 0 0 5px gold; opacity: 1; }
+
 .adv-img-card.selected { border: 4px solid #ff4081; }
 .adv-img-card.selected::after {
-    content: '✔'; position: absolute; top: 10px; right: 10px; background: #ff4081; color: white;
-    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;
-}
-
-/* 메타데이터(프롬프트) 텍스트 영역 */
-.adv-img-meta {
-    display: none; /* 토글 켜질 때만 block */
-    padding: 8px; font-size: 0.8em; background: rgba(0,0,0,0.8);
-    color: #aaa; word-wrap: break-word; max-height: 80px; overflow-y: auto;
-}
-
-/* 하단 페이징 바 */
-#adv-pagination {
-    padding: 10px; display: flex; justify-content: center; gap: 15px; align-items: center;
-    border-top: 1px solid var(--SmartThemeBorderColor, #555);
+    content: '✔'; position: absolute; top: 5px; right: 5px; background: #ff4081;
+    color: white; width: 25px; height: 25px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-weight: bold;
 }
 
 /* 크게 보기 (라이트박스) */
 #adv-lightbox {
     display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    background: rgba(0,0,0,0.95); z-index: 3000; justify-content: center; align-items: center;
+    background: rgba(0,0,0,0.95); z-index: 3000; flex-direction: column; justify-content: center; align-items: center;
 }
-#adv-lightbox img { max-width: 80vw; max-height: 90vh; object-fit: contain; }
+#adv-lightbox-img { max-width: 95vw; max-height: 80vh; object-fit: contain; }
+
+/* 하단 반투명 네비게이션 버튼 (요구사항 반영) */
+#adv-lightbox-nav {
+    position: absolute; bottom: 20px; display: flex; gap: 20px;
+}
 .adv-nav-btn {
-    position: absolute; top: 50%; transform: translateY(-50%);
-    background: rgba(255,255,255,0.2); color: white; border: none; font-size: 30px;
-    width: 50px; height: 50px; border-radius: 50%; cursor: pointer;
+    background: rgba(255,255,255,0.2); border: none; color: white;
+    font-size: 20px; padding: 10px 25px; border-radius: 10px; cursor: pointer; backdrop-filter: blur(5px);
 }
-.adv-nav-btn:hover { background: rgba(255,255,255,0.5); }
-#adv-nav-left { left: 20px; }
-#adv-nav-right { right: 20px; }
+.adv-nav-btn:hover { background: rgba(255,255,255,0.4); }
+
+/* 모바일 2열 강제 고정 */
+@media screen and (max-width: 768px) {
+    #adv-gallery-container { grid-template-columns: repeat(2, 1fr) !important; }
+}
