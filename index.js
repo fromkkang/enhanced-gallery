@@ -94,6 +94,10 @@ async function fetchAllImagesAndPopulateChars() {
 
     try {
         const res = await fetch('/api/images/get');
+        
+        // 서버 응답이 정상이 아닐 경우 방어
+        if (!res.ok) throw new Error("이미지 API를 불러오지 못했습니다.");
+        
         const data = await res.json();
         allImagePaths = Array.isArray(data) ? data : (data.images || []);
 
@@ -101,6 +105,7 @@ async function fetchAllImagesAndPopulateChars() {
         
         // 경로에서 폴더명 추출 및 가장 최근(배열 뒤쪽) 인덱스 기록
         allImagePaths.forEach((path, idx) => {
+            if (typeof path !== 'string') return; // 경로가 텍스트가 아니면 무시 (방어 로직)
             const normalizedPath = path.replace(/\\/g, '/');
             const match = normalizedPath.match(/\/images\/([^/]+)\//i);
             if (match) {
@@ -112,23 +117,31 @@ async function fetchAllImagesAndPopulateChars() {
         let validChars = [];
 
         // 존재하는 캐릭터와 이미지 폴더 매칭
-        if (context.characters) {
+        if (context.characters && Array.isArray(context.characters)) {
             context.characters.forEach(c => {
-                const avatarBase = c.avatar.replace(/\.[^/.]+$/, "");
-                const charName = c.name;
+                // 아바타나 이름이 비어있을(null) 경우를 대비한 안전장치 추가
+                const avatarFile = c.avatar || ""; 
+                const charName = c.name || "Unknown";
+                const avatarBase = avatarFile.replace(/\.[^/.]+$/, ""); 
 
                 let matchedFolder = null;
-                // 폴더 이름이 아바타 파일명이나 캐릭터 이름과 일치하는지 확인
-                if (folderLastIndexMap[avatarBase] !== undefined) matchedFolder = avatarBase;
-                else if (folderLastIndexMap[charName] !== undefined) matchedFolder = charName;
-                else {
+                
+                // 폴더 이름 매칭 로직
+                if (avatarBase && folderLastIndexMap[avatarBase] !== undefined) {
+                    matchedFolder = avatarBase;
+                } else if (charName && folderLastIndexMap[charName] !== undefined) {
+                    matchedFolder = charName;
+                } else {
                     const keys = Object.keys(folderLastIndexMap);
-                    matchedFolder = keys.find(k => k.toLowerCase() === avatarBase.toLowerCase() || k.toLowerCase() === charName.toLowerCase());
+                    matchedFolder = keys.find(k => 
+                        (avatarBase && k.toLowerCase() === avatarBase.toLowerCase()) || 
+                        (charName && k.toLowerCase() === charName.toLowerCase())
+                    );
                 }
 
                 if (matchedFolder) {
                     validChars.push({
-                        name: c.name,
+                        name: charName,
                         folder: matchedFolder,
                         lastIdx: folderLastIndexMap[matchedFolder]
                     });
@@ -150,8 +163,9 @@ async function fetchAllImagesAndPopulateChars() {
         });
 
     } catch (e) {
-        console.error(e);
-        select.innerHTML = '<option value="">오류 발생</option>';
+        // 에러가 났을 때 F12 개발자 도구에 상세 이유를 띄움
+        console.error("갤러리 로딩 중 오류 발생:", e);
+        select.innerHTML = '<option value="">오류 발생 (F12 콘솔 확인)</option>';
     }
 }
 
@@ -162,6 +176,7 @@ function loadAndSortImages(folderName) {
 
     // 캐싱된 전체 이미지에서 해당 폴더명 추출
     currentImages = allImagePaths.filter(path => {
+        if (typeof path !== 'string') return false;
         const normalizedPath = path.replace(/\\/g, '/');
         return normalizedPath.includes(`/images/${folderName}/`);
     });
