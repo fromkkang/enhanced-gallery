@@ -1,329 +1,265 @@
-import { getContext, extension_settings } from "../../../extensions.js";
+import { getContext } from "../../../extensions.js";
 
-// 상태 변수
-let currentImages = []; // 현재 로드된 전체 이미지 리스트
+let currentImages = [];
 let selectedImages = new Set();
+let favoriteImages = new Set(JSON.parse(localStorage.getItem('advGalleryFavs')) || []);
 let isSelectMode = false;
 let isMetaMode = false;
+let currentPage = 1, itemsPerPage = 8, currentLightboxIndex = 0;
 
-// 페이징 관련 상태
-let currentPage = 1;
-let itemsPerPage = 8;
-let currentLightboxIndex = 0; // 좌우 이동을 위한 인덱스
-
-// UI HTML 템플릿
+// 아이콘 위주의 깔끔한 UI 템플릿
 const template = `
 <div id="adv-gallery-popup" style="display:none;">
+    <!-- 메인 컨트롤 패널 -->
     <div id="adv-gallery-controls">
-        <div style="display:flex; gap:10px; align-items:center;">
-            <label>캐릭터:</label>
-            <select id="adv-char-select"><option value="">캐릭터를 선택하세요</option></select>
-            
-            <label>보기:</label>
-            <select id="adv-grid-select">
-                <option value="4">4장 보기 (크게)</option>
-                <option value="8" selected>8장 보기 (중간)</option>
-                <option value="20">20장 보기 (작게)</option>
-                <option value="50">50장 보기 (매우 작게)</option>
-            </select>
-        </div>
-        <div>
-            <button id="adv-btn-meta">📝 프롬프트 보기: OFF</button>
-            <button id="adv-btn-select">✅ 선택 모드: OFF</button>
-            <button id="adv-btn-close">❌ 닫기</button>
-        </div>
+        <select class="adv-ctrl-item" id="adv-char-select" title="캐릭터 선택"><option value="">👤 선택</option></select>
+        <select class="adv-ctrl-item" id="adv-sort-select" title="정렬">
+            <option value="newest">🕒 최신순</option>
+            <option value="oldest">⏳ 오래된순</option>
+            <option value="size">⚖️ 크기순(임시)</option>
+        </select>
+        <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수">
+            <option value="4">🔲 4</option><option value="8" selected>🔲 8</option>
+            <option value="20">🔲 20</option>
+        </select>
+        
+        <button class="adv-ctrl-item" id="adv-btn-meta" title="프롬프트 보기">📝</button>
+        <button class="adv-ctrl-item" id="adv-btn-select" title="다중 선택 모드">✅</button>
+        <button class="adv-ctrl-item" id="adv-btn-close" title="닫기">❌</button>
     </div>
     
-    <!-- 선택 모드 시 나타나는 액션 바 (요구사항 5) -->
-    <div id="adv-selection-actions">
-        <button id="adv-btn-sel-all">전체 선택</button>
-        <button id="adv-btn-del-sel" class="btn-danger">🗑️ 선택 삭제 (<span id="adv-sel-count">0</span>)</button>
-        <button id="adv-btn-save-sel" class="btn-success">💾 선택 저장</button>
-        <button id="adv-btn-del-unsel" class="btn-warning">⚠️ 선택 제외 전부 삭제</button>
+    <!-- 선택 모드 액션 바 (즐겨찾기 보호됨) -->
+    <div id="adv-selection-actions" style="display:none; background: rgba(255,64,129,0.1); border-bottom: 1px solid #ff4081;">
+        <button class="adv-ctrl-item" id="adv-btn-sel-all">☑️ 전체선택</button>
+        <button class="adv-ctrl-item" id="adv-btn-del-sel" style="color:#ff4d4d;">🗑️ 삭제(<span id="adv-sel-count">0</span>)</button>
+        <button class="adv-ctrl-item" id="adv-btn-del-unsel" style="color:orange;">⚠️ 반전삭제</button>
+        <button class="adv-ctrl-item" id="adv-btn-save-sel" style="color:#4caf50;">💾 저장</button>
     </div>
 
+    <!-- 갤러리 영역 -->
     <div id="adv-gallery-container"></div>
     
-    <div id="adv-pagination">
-        <button id="adv-btn-prev-page">◀ 이전 페이지</button>
-        <span id="adv-page-info">페이지 1 / 1</span>
-        <button id="adv-btn-next-page">다음 페이지 ▶</button>
+    <!-- 페이징 -->
+    <div style="display:flex; justify-content:center; gap:10px; padding:10px; border-top:1px solid #555;">
+        <button class="adv-ctrl-item" id="adv-btn-prev-page">◀</button>
+        <span id="adv-page-info" style="align-self:center;">1/1</span>
+        <button class="adv-ctrl-item" id="adv-btn-next-page">▶</button>
     </div>
 </div>
 
+<!-- 라이트박스 -->
 <div id="adv-lightbox">
-    <button id="adv-nav-left" class="adv-nav-btn">◀</button>
     <img id="adv-lightbox-img" src="">
-    <button id="adv-nav-right" class="adv-nav-btn">▶</button>
+    <!-- 프롬프트 복사 & 하단 네비게이션 -->
+    <div id="adv-lightbox-nav">
+        <button class="adv-nav-btn" id="adv-nav-left">◀</button>
+        <button class="adv-nav-btn" id="adv-btn-copy-prompt" title="프롬프트를 채팅창에 복사">📋 프롬프트 복사</button>
+        <button class="adv-nav-btn" id="adv-nav-right">▶</button>
+    </div>
 </div>
 `;
 
-// ==========================================
-// 1. 초기화 및 UI 생성
-// ==========================================
+// 초기화
 async function init() {
     document.body.insertAdjacentHTML('beforeend', template);
-
-    // ST 상단 확장 메뉴(톱니바퀴)에 갤러리 열기 버튼 삽입
-    // setInterval을 써서 ST UI가 완전히 렌더링된 후 버튼을 넣음 (버그 방지)
     const injectBtn = setInterval(() => {
         const extMenu = document.getElementById('extensionsMenu');
         if (extMenu) {
             const btn = document.createElement('div');
             btn.className = 'list-group-item flex-container flexGap5';
-            btn.innerHTML = `<span>🎨 고급 캐릭터 갤러리</span>`;
-            btn.style.cursor = 'pointer';
+            btn.innerHTML = `<span>🖼️ 갤러리 (Adv)</span>`;
             btn.addEventListener('click', openGallery);
             extMenu.appendChild(btn);
             clearInterval(injectBtn);
         }
     }, 1000);
-
     bindEvents();
 }
 
-// ==========================================
-// 2. 갤러리 열기 & 캐릭터 목록 로드
-// ==========================================
 function openGallery() {
     document.getElementById('adv-gallery-popup').style.display = 'flex';
-    
-    // ST 전역 변수 'characters' 활용 (요구사항 2: 캐릭터 목록)
     const context = getContext();
-    const charSelect = document.getElementById('adv-char-select');
-    charSelect.innerHTML = '<option value="">캐릭터를 선택하세요</option>';
-    
-    if (context.characters && context.characters.length > 0) {
-        context.characters.forEach(char => {
-            const opt = document.createElement('option');
-            opt.value = char.avatar; // 보통 아바타 이미지 이름 기반으로 폴더가 생성됨
-            opt.textContent = char.name;
-            charSelect.appendChild(opt);
+    const select = document.getElementById('adv-char-select');
+    select.innerHTML = '<option value="">👤 선택</option>';
+    if (context.characters) {
+        context.characters.forEach(c => {
+            select.innerHTML += `<option value="${c.avatar}">${c.name}</option>`;
         });
     }
 }
 
-// ==========================================
-// 3. 서버에서 이미지 가져오기
-// ==========================================
-async function loadCharacterImages(charAvatarName) {
-    if (!charAvatarName) return;
-    currentImages = [];
-    currentPage = 1;
-    resetSelection();
-
+// 서버 이미지 로드 및 정렬
+async function loadAndSortImages(charAvatar) {
+    if (!charAvatar) return;
     try {
-        // ST 내부 API 사용 (캐릭터별 채팅 이미지 가져오기)
-        // 주의: ST 버전에 따라 엔드포인트가 약간 다를 수 있으나 보통 chat/images나 characters에 종속됨
-        // 이 예제는 실리태번의 get api를 호출해 캐릭터 이름이 포함된 이미지를 필터링하는 방식입니다.
-        const response = await fetch('/api/images/get'); 
-        const data = await response.json();
-        
+        const res = await fetch('/api/images/get'); 
+        let data = await res.json();
         let allFiles = Array.isArray(data) ? data : (data.images || []);
         
-        // 해당 캐릭터가 속한 이미지 필터링 로직 (실제 ST 파일 구조에 맞게 커스텀 필요할 수 있음)
-        currentImages = allFiles.filter(img => img.includes(charAvatarName.split('.')[0]));
+        currentImages = allFiles.filter(img => img.includes(charAvatar.split('.')[0]));
         
+        // 정렬 로직 (파일명에 포함된 타임스탬프 기준)
+        const sortType = document.getElementById('adv-sort-select').value;
+        if (sortType === 'newest') {
+            currentImages.sort().reverse(); // 최신순 (이름 역순)
+        } else if (sortType === 'oldest') {
+            currentImages.sort(); // 오래된순
+        } else if (sortType === 'size') {
+            // 크기순 정렬 (API에서 크기를 안 주므로 이름 길이로 임시 대체 - ST 한계)
+            currentImages.sort((a, b) => b.length - a.length);
+        }
+
+        currentPage = 1;
         renderGrid();
-    } catch (e) {
-        console.error("이미지 로드 실패", e);
-        alert("이미지를 불러오는 중 오류가 발생했습니다.");
-    }
+    } catch(e) { console.error(e); }
 }
 
-// ==========================================
-// 4. 화면 그리기 (페이징 & 그리드 크기)
-// ==========================================
+// 그리드 렌더링
 function renderGrid() {
     const container = document.getElementById('adv-gallery-container');
     container.innerHTML = '';
-    
-    // 그리드 열 수 동적 조절 (요구사항 4)
-    let columns = itemsPerPage == 4 ? 2 : (itemsPerPage == 8 ? 4 : (itemsPerPage == 20 ? 5 : 8));
-    container.style.setProperty('--columns', columns);
+    container.style.setProperty('--columns', itemsPerPage == 4 ? 2 : (itemsPerPage == 8 ? 4 : 6));
 
-    // 페이징 계산
     const totalPages = Math.ceil(currentImages.length / itemsPerPage) || 1;
-    document.getElementById('adv-page-info').textContent = `페이지 ${currentPage} / ${totalPages}`;
+    document.getElementById('adv-page-info').textContent = `${currentPage}/${totalPages}`;
     
     const startIdx = (currentPage - 1) * itemsPerPage;
-    const endIdx = startIdx + itemsPerPage;
-    const pageImages = currentImages.slice(startIdx, endIdx);
+    const pageImages = currentImages.slice(startIdx, startIdx + itemsPerPage);
 
     pageImages.forEach((src, idx) => {
         const card = document.createElement('div');
         card.className = `adv-img-card ${selectedImages.has(src) ? 'selected' : ''}`;
         
+        // 즐겨찾기 버튼
+        const favBtn = document.createElement('button');
+        favBtn.className = `adv-btn-fav ${favoriteImages.has(src) ? 'active' : ''}`;
+        favBtn.innerHTML = favoriteImages.has(src) ? '⭐' : '☆';
+        favBtn.onclick = (e) => {
+            e.stopPropagation(); // 클릭 시 이미지 확대 방지
+            if (favoriteImages.has(src)) favoriteImages.delete(src);
+            else favoriteImages.add(src);
+            localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
+            favBtn.innerHTML = favoriteImages.has(src) ? '⭐' : '☆';
+            favBtn.classList.toggle('active');
+        };
+
         const img = document.createElement('img');
         img.src = src;
-        
-        // 프롬프트 메타데이터 영역 (요구사항 3)
-        const meta = document.createElement('div');
-        meta.className = 'adv-img-meta';
-        meta.textContent = "프롬프트 데이터 로딩 불가 (가상 데이터)"; // *실제 메타데이터 추출 API 연동 필요*
-        meta.style.display = isMetaMode ? 'block' : 'none';
 
+        card.appendChild(favBtn);
         card.appendChild(img);
-        card.appendChild(meta);
-        container.appendChild(card);
+        
+        if (isMetaMode) {
+            const meta = document.createElement('div');
+            meta.style.cssText = 'position:absolute; bottom:0; background:rgba(0,0,0,0.8); font-size:10px; padding:5px; width:100%;';
+            meta.innerText = "프롬프트 데이터 (API 연동 필요)";
+            card.appendChild(meta);
+        }
 
-        // 이미지 클릭 이벤트
-        card.addEventListener('click', () => {
+        card.onclick = () => {
             if (isSelectMode) {
-                // 선택 모드
-                if (selectedImages.has(src)) {
-                    selectedImages.delete(src);
-                    card.classList.remove('selected');
-                } else {
-                    selectedImages.add(src);
-                    card.classList.add('selected');
-                }
-                document.getElementById('adv-sel-count').textContent = selectedImages.size;
+                if (selectedImages.has(src)) { selectedImages.delete(src); card.classList.remove('selected'); }
+                else { selectedImages.add(src); card.classList.add('selected'); }
+                document.getElementById('adv-sel-count').innerText = selectedImages.size;
             } else {
-                // 크게 보기 (요구사항 1)
-                openLightbox(startIdx + idx);
+                currentLightboxIndex = startIdx + idx;
+                document.getElementById('adv-lightbox-img').src = src;
+                document.getElementById('adv-lightbox').style.display = 'flex';
             }
-        });
+        };
+        container.appendChild(card);
     });
 }
 
-// ==========================================
-// 5. 크게 보기 (라이트박스) 및 좌우 이동
-// ==========================================
-function openLightbox(index) {
-    if(currentImages.length === 0) return;
-    currentLightboxIndex = index;
-    const lightbox = document.getElementById('adv-lightbox');
-    document.getElementById('adv-lightbox-img').src = currentImages[currentLightboxIndex];
-    lightbox.style.display = 'flex';
+// 이벤트 바인딩
+function bindEvents() {
+    document.getElementById('adv-btn-close').onclick = () => document.getElementById('adv-gallery-popup').style.display = 'none';
+    
+    document.getElementById('adv-char-select').onchange = (e) => loadAndSortImages(e.target.value);
+    document.getElementById('adv-sort-select').onchange = () => loadAndSortImages(document.getElementById('adv-char-select').value);
+    document.getElementById('adv-grid-select').onchange = (e) => { itemsPerPage = parseInt(e.target.value); renderGrid(); };
+
+    document.getElementById('adv-btn-prev-page').onclick = () => { if(currentPage > 1) { currentPage--; renderGrid(); } };
+    document.getElementById('adv-btn-next-page').onclick = () => { if(currentPage < Math.ceil(currentImages.length/itemsPerPage)) { currentPage++; renderGrid(); } };
+
+    document.getElementById('adv-btn-meta').onclick = (e) => {
+        isMetaMode = !isMetaMode;
+        e.target.style.background = isMetaMode ? '#555' : '';
+        renderGrid();
+    };
+
+    document.getElementById('adv-btn-select').onclick = (e) => {
+        isSelectMode = !isSelectMode;
+        e.target.style.background = isSelectMode ? '#555' : '';
+        document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
+        selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0'; renderGrid();
+    };
+
+    document.getElementById('adv-btn-sel-all').onclick = () => {
+        currentImages.forEach(src => selectedImages.add(src));
+        document.getElementById('adv-sel-count').innerText = selectedImages.size; renderGrid();
+    };
+
+    document.getElementById('adv-btn-del-sel').onclick = () => deleteTargetImages(Array.from(selectedImages));
+    document.getElementById('adv-btn-del-unsel').onclick = () => {
+        const unsel = currentImages.filter(src => !selectedImages.has(src));
+        deleteTargetImages(unsel);
+    };
+
+    document.getElementById('adv-btn-save-sel').onclick = () => {
+        selectedImages.forEach(src => {
+            const a = document.createElement('a'); a.href = src; a.download = src.split('/').pop();
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        });
+    };
+
+    // 하단 네비게이션 작동
+    document.getElementById('adv-nav-left').onclick = (e) => { e.stopPropagation(); navLightbox(-1); };
+    document.getElementById('adv-nav-right').onclick = (e) => { e.stopPropagation(); navLightbox(1); };
+    document.getElementById('adv-lightbox').onclick = (e) => { if(e.target.id === 'adv-lightbox') e.target.style.display = 'none'; };
+
+    // 프롬프트 복사 & 채팅창 삽입 로직
+    document.getElementById('adv-btn-copy-prompt').onclick = (e) => {
+        e.stopPropagation();
+        const dummyPrompt = "masterpiece, best quality, 1girl, blonde hair, smiling"; // 실제 메타데이터 추출 연동 필요
+        
+        // 1. 클립보드 복사
+        navigator.clipboard.writeText(dummyPrompt).then(() => {
+            alert("프롬프트가 클립보드에 복사되었습니다.");
+        });
+
+        // 2. 실리태번 채팅 입력창(textarea)에 바로 텍스트 추가
+        const chatInput = document.getElementById('send_textarea');
+        if (chatInput) {
+            chatInput.value += (chatInput.value ? ", " : "") + dummyPrompt;
+            chatInput.dispatchEvent(new Event('input', { bubbles: true })); // ST가 텍스트 변화를 인식하게 함
+        }
+    };
 }
 
-function navLightbox(direction) {
-    currentLightboxIndex += direction;
+function navLightbox(dir) {
+    currentLightboxIndex += dir;
     if (currentLightboxIndex < 0) currentLightboxIndex = currentImages.length - 1;
     if (currentLightboxIndex >= currentImages.length) currentLightboxIndex = 0;
     document.getElementById('adv-lightbox-img').src = currentImages[currentLightboxIndex];
 }
 
-// ==========================================
-// 6. 이벤트 바인딩
-// ==========================================
-function bindEvents() {
-    // 닫기
-    document.getElementById('adv-btn-close').addEventListener('click', () => {
-        document.getElementById('adv-gallery-popup').style.display = 'none';
-        resetSelection();
-    });
-
-    // 캐릭터 선택 변경 시 (요구사항 2)
-    document.getElementById('adv-char-select').addEventListener('change', (e) => {
-        loadCharacterImages(e.target.value);
-    });
-
-    // 보기 방식(페이징) 변경 시 (요구사항 4)
-    document.getElementById('adv-grid-select').addEventListener('change', (e) => {
-        itemsPerPage = parseInt(e.target.value);
-        currentPage = 1;
-        renderGrid();
-    });
-
-    // 페이징 버튼
-    document.getElementById('adv-btn-prev-page').addEventListener('click', () => {
-        if(currentPage > 1) { currentPage--; renderGrid(); }
-    });
-    document.getElementById('adv-btn-next-page').addEventListener('click', () => {
-        const maxPage = Math.ceil(currentImages.length / itemsPerPage);
-        if(currentPage < maxPage) { currentPage++; renderGrid(); }
-    });
-
-    // 메타데이터 토글 (요구사항 3)
-    document.getElementById('adv-btn-meta').addEventListener('click', (e) => {
-        isMetaMode = !isMetaMode;
-        e.target.textContent = `📝 프롬프트 보기: ${isMetaMode ? 'ON' : 'OFF'}`;
-        document.querySelectorAll('.adv-img-meta').forEach(el => el.style.display = isMetaMode ? 'block' : 'none');
-    });
-
-    // 선택 모드 토글 (요구사항 5)
-    document.getElementById('adv-btn-select').addEventListener('click', (e) => {
-        isSelectMode = !isSelectMode;
-        e.target.textContent = `✅ 선택 모드: ${isSelectMode ? 'ON' : 'OFF'}`;
-        document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
-        if(!isSelectMode) resetSelection();
-    });
-
-    // --- 선택 액션 버튼들 (요구사항 5) ---
-    document.getElementById('adv-btn-sel-all').addEventListener('click', () => {
-        currentImages.forEach(src => selectedImages.add(src));
-        document.getElementById('adv-sel-count').textContent = selectedImages.size;
-        renderGrid();
-    });
-
-    document.getElementById('adv-btn-del-sel').addEventListener('click', () => deleteTargetImages(Array.from(selectedImages)));
-    
-    document.getElementById('adv-btn-del-unsel').addEventListener('click', () => {
-        if(confirm("정말 선택된 이미지를 제외한 '모든' 이미지를 삭제할까요?")) {
-            const unselected = currentImages.filter(src => !selectedImages.has(src));
-            deleteTargetImages(unselected);
-        }
-    });
-
-    document.getElementById('adv-btn-save-sel').addEventListener('click', downloadSelected);
-
-    // --- 라이트박스 이벤트 (요구사항 1) ---
-    document.getElementById('adv-nav-left').addEventListener('click', (e) => { e.stopPropagation(); navLightbox(-1); });
-    document.getElementById('adv-nav-right').addEventListener('click', (e) => { e.stopPropagation(); navLightbox(1); });
-    document.getElementById('adv-lightbox').addEventListener('click', (e) => {
-        if(e.target.id === 'adv-lightbox') document.getElementById('adv-lightbox').style.display = 'none';
-    });
-
-    // 키보드 방향키 이동 (라이트박스가 열려있을 때만)
-    document.addEventListener('keydown', (e) => {
-        if(document.getElementById('adv-lightbox').style.display === 'flex') {
-            if(e.key === 'ArrowLeft') navLightbox(-1);
-            if(e.key === 'ArrowRight') navLightbox(1);
-            if(e.key === 'Escape') document.getElementById('adv-lightbox').style.display = 'none';
-        }
-    });
-}
-
-// 선택 초기화 유틸리티
-function resetSelection() {
-    selectedImages.clear();
-    document.getElementById('adv-sel-count').textContent = '0';
-    document.querySelectorAll('.adv-img-card').forEach(c => c.classList.remove('selected'));
-}
-
-// 파일 다중 삭제 로직
+// 안전한 삭제 (즐겨찾기 보호)
 async function deleteTargetImages(targetArray) {
-    if(targetArray.length === 0) return;
-    if(!confirm(`총 ${targetArray.length}장의 이미지를 삭제하시겠습니까?`)) return;
+    const toDelete = targetArray.filter(src => !favoriteImages.has(src)); // 즐겨찾기는 삭제 목록에서 제외
+    
+    if (toDelete.length === 0) return alert("삭제할 이미지가 없거나 모두 즐겨찾기로 보호되어 있습니다.");
+    if (!confirm(`즐겨찾기된 이미지를 제외한 ${toDelete.length}장을 영구 삭제합니다. 진행할까요?`)) return;
 
-    for(let src of targetArray) {
+    for (let src of toDelete) {
         await fetch('/api/images/delete', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({path: src})
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: src})
         });
         currentImages = currentImages.filter(img => img !== src);
     }
     
-    resetSelection();
-    renderGrid();
-    alert('삭제가 완료되었습니다.');
+    selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0';
+    renderGrid(); alert('삭제 완료!');
 }
 
-// 파일 다중 저장(다운로드) 로직
-function downloadSelected() {
-    if(selectedImages.size === 0) return;
-    selectedImages.forEach(src => {
-        const a = document.createElement('a');
-        a.href = src;
-        a.download = src.split('/').pop(); // 파일명 추출
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    });
-}
-
-// ST 로드 시 실행
 jQuery(document).ready(init);
