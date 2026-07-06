@@ -62,7 +62,7 @@ function addWandMenuButtons() {
         var btn = document.createElement('div');
         btn.id = 'adv-gallery-menu-btn';
         btn.className = 'list-group-item flex-container flexGap5';
-        btn.innerHTML = '<div class="fa-solid fa-images extensionsMenuExtensionButton" style="color:#ff4081;"></div><span>고급 갤러리</span>';
+        btn.innerHTML = '<div class="fa-solid fa-images extensionsMenuExtensionButton" style="color:#ff4081;"></div><span>갤러리</span>';
         btn.addEventListener('click', function () {
             document.getElementById('adv-gallery-popup').style.display = 'flex';
             
