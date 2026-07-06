@@ -1,54 +1,67 @@
 import { getContext } from '../../../extensions.js';
 
-let currentImages = [];
+let allImagePaths = []; // 서버에서 불러온 전체 이미지 캐싱
+let currentImages = []; // 선택된 캐릭터의 이미지
 let selectedImages = new Set();
 let favoriteImages = new Set(JSON.parse(localStorage.getItem('advGalleryFavs')) || []);
 let isSelectMode = false;
-let isLightMode = false;
 let currentPage = 1, itemsPerPage = 8, currentLightboxIndex = 0;
 
+// 모바일 최적화 및 FontAwesome 아이콘 적용된 템플릿
 const template = `
-<div id="adv-gallery-popup" style="display:none;">
-    <div id="adv-gallery-controls">
-        <div style="display:flex; align-items:center; gap:5px;">
-            <select class="adv-ctrl-item" id="adv-char-select" title="캐릭터 선택"><option value="">👤 캐릭터 선택</option></select>
-            <span id="adv-char-size" style="font-size:12px; opacity:0.6; white-space:nowrap; padding-right:10px;"></span>
+<div id="adv-gallery-popup" style="display:none; position:fixed; top:5vh; left:5vw; width:90vw; height:90vh; min-width:320px; min-height:400px; resize:both; overflow:hidden; background:var(--SmartThemeBlurTintColor, #1a1a1a); backdrop-filter:blur(10px); border:1px solid var(--SmartThemeBorderColor, #444); border-radius:12px; z-index:9999; flex-direction:column; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+    
+    <!-- 상단 컨트롤 바 -->
+    <div id="adv-gallery-controls" style="display:flex; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--SmartThemeBorderColor, #444); background:rgba(0,0,0,0.2); overflow-x:auto; flex-shrink:0; white-space:nowrap;">
+        
+        <select class="adv-ctrl-item" id="adv-char-select" title="캐릭터 선택" style="padding:5px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:1px solid #555;">
+            <option value="">로딩중...</option>
+        </select>
+        <span id="adv-char-size" style="font-size:12px; opacity:0.6; padding-right:5px;"></span>
+        
+        <select class="adv-ctrl-item" id="adv-sort-select" title="정렬" style="padding:5px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:1px solid #555;">
+            <option value="newest">최신순</option>
+            <option value="oldest">오래된순</option>
+            <option value="size">용량순</option>
+        </select>
+        
+        <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수" style="padding:5px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:1px solid #555;">
+            <option value="4">4장 보기</option><option value="8" selected>8장 보기</option><option value="20">20장 보기</option>
+        </select>
+        
+        <!-- 우측 아이콘 버튼들 -->
+        <div style="margin-left:auto; display:flex; gap:8px;">
+            <button class="adv-ctrl-item" id="adv-btn-select" title="다중 선택 모드" style="width:32px; height:32px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:1px solid #555; cursor:pointer;"><i class="fa-solid fa-check-double"></i></button>
+            <button class="adv-ctrl-item" id="adv-btn-close" title="닫기" style="width:32px; height:32px; border-radius:5px; background:rgba(255,77,77,0.2); color:#ff4d4d; border:1px solid rgba(255,77,77,0.5); cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <select class="adv-ctrl-item" id="adv-sort-select" title="정렬">
-            <option value="newest">🕒 최신순</option>
-            <option value="oldest">⏳ 오래된순</option>
-            <option value="size">⚖️ 파일명길이순(크기대체)</option>
-        </select>
-        <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수">
-            <option value="4">🔲 4장 보기</option><option value="8" selected>🔲 8장 보기</option><option value="20">🔲 20장 보기</option>
-        </select>
-        <button class="adv-ctrl-item" id="adv-btn-theme" title="다크/라이트 모드 전환">🌓</button>
-        <button class="adv-ctrl-item" id="adv-btn-select" title="다중 선택 모드">✅</button>
-        <button class="adv-ctrl-item" id="adv-btn-close" title="닫기" style="color:#ff4d4d;">❌</button>
     </div>
 
-    <div id="adv-selection-actions" style="display:none; background: rgba(255,64,129,0.1); border-bottom: 1px solid #ff4081;">
-        <button class="adv-ctrl-item" id="adv-btn-sel-all">☑️ 전체선택</button>
-        <button class="adv-ctrl-item" id="adv-btn-del-sel" style="color:#ff4d4d;">🗑️ 삭제(<span id="adv-sel-count">0</span>)</button>
-        <button class="adv-ctrl-item" id="adv-btn-del-unsel" style="color:orange;">⚠️ 반전삭제</button>
-        <button class="adv-ctrl-item" id="adv-btn-save-sel" style="color:#4caf50;">💾 저장</button>
+    <!-- 다중 선택 모드 액션 바 -->
+    <div id="adv-selection-actions" style="display:none; padding:8px 10px; gap:10px; align-items:center; background:rgba(255,64,129,0.15); border-bottom:1px solid #ff4081; flex-shrink:0; overflow-x:auto; white-space:nowrap;">
+        <button class="adv-ctrl-item" id="adv-btn-sel-all" style="padding:5px 10px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:none; cursor:pointer;"><i class="fa-solid fa-check-square"></i> 전체선택</button>
+        <button class="adv-ctrl-item" id="adv-btn-del-sel" style="padding:5px 10px; border-radius:5px; background:rgba(255,77,77,0.2); color:#ff4d4d; border:none; cursor:pointer; font-weight:bold;"><i class="fa-solid fa-trash"></i> 삭제(<span id="adv-sel-count">0</span>)</button>
+        <button class="adv-ctrl-item" id="adv-btn-del-unsel" style="padding:5px 10px; border-radius:5px; background:rgba(255,165,0,0.2); color:orange; border:none; cursor:pointer;"><i class="fa-solid fa-triangle-exclamation"></i> 제외삭제</button>
+        <button class="adv-ctrl-item" id="adv-btn-save-sel" style="padding:5px 10px; border-radius:5px; background:rgba(76,175,80,0.2); color:#4caf50; border:none; cursor:pointer;"><i class="fa-solid fa-download"></i> 저장</button>
     </div>
 
-    <div id="adv-gallery-container"></div>
+    <!-- 이미지 그리드 영역 -->
+    <div id="adv-gallery-container" style="flex-grow:1; overflow-y:auto; padding:15px; display:grid; gap:10px; grid-template-columns:repeat(var(--columns, 4), 1fr); align-content:start;"></div>
 
-    <div id="adv-pagination" style="display:flex; justify-content:center; gap:10px; padding:10px; border-top:1px solid #444;">
-        <button class="adv-ctrl-item" id="adv-btn-prev-page">◀ 이전</button>
-        <span id="adv-page-info" style="align-self:center;">1/1</span>
-        <button class="adv-ctrl-item" id="adv-btn-next-page">다음 ▶</button>
+    <!-- 하단 페이징 -->
+    <div id="adv-pagination" style="display:flex; justify-content:center; gap:15px; padding:10px; border-top:1px solid var(--SmartThemeBorderColor, #444); background:rgba(0,0,0,0.2); flex-shrink:0;">
+        <button class="adv-ctrl-item" id="adv-btn-prev-page" style="width:36px; height:30px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:none; cursor:pointer;"><i class="fa-solid fa-chevron-left"></i></button>
+        <span id="adv-page-info" style="align-self:center; font-size:13px; opacity:0.8;">1 / 1</span>
+        <button class="adv-ctrl-item" id="adv-btn-next-page" style="width:36px; height:30px; border-radius:5px; background:rgba(255,255,255,0.1); color:inherit; border:none; cursor:pointer;"><i class="fa-solid fa-chevron-right"></i></button>
     </div>
 </div>
 
-<div id="adv-lightbox" style="display:none;">
-    <img id="adv-lightbox-img" src="">
-    <div id="adv-lightbox-nav">
-        <button class="adv-nav-btn" id="adv-nav-left">◀ 이전</button>
-        <button class="adv-nav-btn" id="adv-btn-copy-prompt" style="font-weight:bold; color:yellow;">📋 프롬프트 복사</button>
-        <button class="adv-nav-btn" id="adv-nav-right">다음 ▶</button>
+<!-- 라이트박스 (크게보기) -->
+<div id="adv-lightbox" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.9); z-index:10000; flex-direction:column; justify-content:center; align-items:center;">
+    <img id="adv-lightbox-img" src="" style="max-width:90vw; max-height:80vh; object-fit:contain; border-radius:8px;">
+    <div id="adv-lightbox-nav" style="position:absolute; bottom:20px; display:flex; gap:15px;">
+        <button class="adv-nav-btn" id="adv-nav-left" style="padding:10px 15px; background:rgba(255,255,255,0.1); color:white; border:none; border-radius:8px; cursor:pointer; backdrop-filter:blur(5px);"><i class="fa-solid fa-chevron-left"></i> 이전</button>
+        <button class="adv-nav-btn" id="adv-btn-copy-prompt" style="padding:10px 15px; background:rgba(255,213,79,0.2); color:#ffd54f; font-weight:bold; border:1px solid rgba(255,213,79,0.5); border-radius:8px; cursor:pointer;"><i class="fa-solid fa-clipboard"></i> 프롬프트 복사</button>
+        <button class="adv-nav-btn" id="adv-nav-right" style="padding:10px 15px; background:rgba(255,255,255,0.1); color:white; border:none; border-radius:8px; cursor:pointer; backdrop-filter:blur(5px);">다음 <i class="fa-solid fa-chevron-right"></i></button>
     </div>
 </div>
 `;
@@ -64,25 +77,105 @@ function addWandMenuButtons() {
         btn.className = 'list-group-item flex-container flexGap5';
         btn.innerHTML = '<div class="fa-solid fa-images extensionsMenuExtensionButton" style="color:#ff4081;"></div><span>갤러리</span>';
 
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', async function () {
             document.getElementById('adv-gallery-popup').style.display = 'flex';
-
-            // 캐릭터 목록 불러오기
-            const context = getContext();
-            const select = document.getElementById('adv-char-select');
-            select.innerHTML = '<option value="">👤 캐릭터 선택</option>';
-            if (context.characters) {
-                context.characters.forEach(c => {
-                    select.innerHTML += `<option value="${c.avatar}">${c.name}</option>`;
-                });
-            }
-
-            // 강제로 display:none 하지 말고, 지팡이 아이콘을 다시 눌러서 정상적으로 닫기
             document.getElementById('extensionsMenuButton')?.click();
+            await fetchAllImagesAndPopulateChars(); // 열 때마다 최신 데이터 로드
         });
 
         menu.appendChild(btn);
     }
+}
+
+// 전체 이미지 스캔 및 이미지가 있는 캐릭터(최근순) 필터링
+async function fetchAllImagesAndPopulateChars() {
+    const select = document.getElementById('adv-char-select');
+    select.innerHTML = '<option value="">데이터 분석 중...</option>';
+
+    try {
+        const res = await fetch('/api/images/get');
+        const data = await res.json();
+        allImagePaths = Array.isArray(data) ? data : (data.images || []);
+
+        let folderLastIndexMap = {}; 
+        
+        // 경로에서 폴더명 추출 및 가장 최근(배열 뒤쪽) 인덱스 기록
+        allImagePaths.forEach((path, idx) => {
+            const normalizedPath = path.replace(/\\/g, '/');
+            const match = normalizedPath.match(/\/images\/([^/]+)\//i);
+            if (match) {
+                folderLastIndexMap[match[1]] = idx; 
+            }
+        });
+
+        const context = getContext();
+        let validChars = [];
+
+        // 존재하는 캐릭터와 이미지 폴더 매칭
+        if (context.characters) {
+            context.characters.forEach(c => {
+                const avatarBase = c.avatar.replace(/\.[^/.]+$/, "");
+                const charName = c.name;
+
+                let matchedFolder = null;
+                // 폴더 이름이 아바타 파일명이나 캐릭터 이름과 일치하는지 확인
+                if (folderLastIndexMap[avatarBase] !== undefined) matchedFolder = avatarBase;
+                else if (folderLastIndexMap[charName] !== undefined) matchedFolder = charName;
+                else {
+                    const keys = Object.keys(folderLastIndexMap);
+                    matchedFolder = keys.find(k => k.toLowerCase() === avatarBase.toLowerCase() || k.toLowerCase() === charName.toLowerCase());
+                }
+
+                if (matchedFolder) {
+                    validChars.push({
+                        name: c.name,
+                        folder: matchedFolder,
+                        lastIdx: folderLastIndexMap[matchedFolder]
+                    });
+                }
+            });
+        }
+
+        // 인덱스 내림차순(가장 최근에 이미지가 추가된 순) 정렬
+        validChars.sort((a, b) => b.lastIdx - a.lastIdx);
+
+        if (validChars.length === 0) {
+            select.innerHTML = '<option value="">이미지가 있는 캐릭터 없음</option>';
+            return;
+        }
+
+        select.innerHTML = '<option value="">👤 캐릭터 선택</option>';
+        validChars.forEach(c => {
+            select.innerHTML += `<option value="${c.folder}">${c.name}</option>`;
+        });
+
+    } catch (e) {
+        console.error(e);
+        select.innerHTML = '<option value="">오류 발생</option>';
+    }
+}
+
+// 선택된 캐릭터 폴더의 이미지만 로드 및 정렬
+function loadAndSortImages(folderName) {
+    document.getElementById('adv-char-size').innerText = '';
+    if (!folderName) { currentImages = []; renderGrid(); return; }
+
+    // 캐싱된 전체 이미지에서 해당 폴더명 추출
+    currentImages = allImagePaths.filter(path => {
+        const normalizedPath = path.replace(/\\/g, '/');
+        return normalizedPath.includes(`/images/${folderName}/`);
+    });
+
+    const sortType = document.getElementById('adv-sort-select').value;
+    
+    // 기본적으로 ST api는 생성순(오래된순)으로 줌
+    if (sortType === 'newest') currentImages.reverse();
+    else if (sortType === 'oldest') { /* 그대로 유지 */ }
+    else if (sortType === 'size') currentImages.sort((a, b) => b.length - a.length);
+
+    currentPage = 1;
+    renderGrid();
+    calculateTotalSize(currentImages);
 }
 
 // 용량 계산 (MB)
@@ -90,7 +183,7 @@ async function calculateTotalSize(images) {
     const sizeSpan = document.getElementById('adv-char-size');
     if (images.length === 0) { sizeSpan.innerText = '(0MB)'; return; }
 
-    sizeSpan.innerText = '(용량 계산 중...)';
+    sizeSpan.innerText = '(계산 중...)';
     let totalSize = 0;
     const chunkSize = 20;
     try {
@@ -111,63 +204,58 @@ async function calculateTotalSize(images) {
     }
 }
 
-async function loadAndSortImages(charAvatar) {
-    document.getElementById('adv-char-size').innerText = '';
-    if (!charAvatar) { currentImages = []; renderGrid(); return; }
-
-    try {
-        const res = await fetch('/api/images/get');
-        let data = await res.json();
-        let allFiles = Array.isArray(data) ? data : (data.images || []);
-        currentImages = allFiles.filter(img => img.includes(charAvatar.split('.')[0]));
-
-        const sortType = document.getElementById('adv-sort-select').value;
-        if (sortType === 'newest') currentImages.sort().reverse();
-        else if (sortType === 'oldest') currentImages.sort();
-        else if (sortType === 'size') currentImages.sort((a, b) => b.length - a.length);
-
-        currentPage = 1;
-        renderGrid();
-        calculateTotalSize(currentImages);
-    } catch(e) { console.error(e); }
-}
-
+// 화면 그리기
 function renderGrid() {
     const container = document.getElementById('adv-gallery-container');
     container.innerHTML = '';
     container.style.setProperty('--columns', itemsPerPage == 4 ? 2 : (itemsPerPage == 8 ? 4 : 6));
 
     const totalPages = Math.ceil(currentImages.length / itemsPerPage) || 1;
-    document.getElementById('adv-page-info').textContent = `${currentPage}/${totalPages}`;
+    document.getElementById('adv-page-info').textContent = `${currentPage} / ${totalPages}`;
 
     const startIdx = (currentPage - 1) * itemsPerPage;
     const pageImages = currentImages.slice(startIdx, startIdx + itemsPerPage);
 
     pageImages.forEach((src, idx) => {
         const card = document.createElement('div');
-        card.className = `adv-img-card ${selectedImages.has(src) ? 'selected' : ''}`;
+        card.style.cssText = `position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; background:rgba(0,0,0,0.3); cursor:pointer; transition:transform 0.1s; border: 2px solid ${selectedImages.has(src) ? '#ff4081' : 'transparent'};`;
+        
+        card.onmouseover = () => card.style.transform = 'scale(1.03)';
+        card.onmouseout = () => card.style.transform = 'scale(1)';
 
         const favBtn = document.createElement('button');
-        favBtn.className = `adv-btn-fav ${favoriteImages.has(src) ? 'active' : ''}`;
-        favBtn.innerHTML = favoriteImages.has(src) ? '⭐' : '☆';
+        favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
+        favBtn.style.cssText = `position:absolute; top:5px; left:5px; width:28px; height:28px; background:rgba(0,0,0,0.5); border:none; border-radius:50%; color:${favoriteImages.has(src) ? '#ffd54f' : 'white'}; cursor:pointer; z-index:10; font-size:12px;`;
+        
         favBtn.onclick = (e) => {
             e.stopPropagation();
             if (favoriteImages.has(src)) favoriteImages.delete(src); else favoriteImages.add(src);
             localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
-            favBtn.innerHTML = favoriteImages.has(src) ? '⭐' : '☆';
-            favBtn.classList.toggle('active');
+            favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
+            favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white';
         };
 
         const img = document.createElement('img');
         img.src = src;
+        img.style.cssText = "width:100%; height:100%; object-fit:cover;";
+        
         card.appendChild(favBtn);
         card.appendChild(img);
 
+        // 선택모드 시 체크 아이콘 추가
+        if(selectedImages.has(src)) {
+            const check = document.createElement('div');
+            check.innerHTML = '<i class="fa-solid fa-check"></i>';
+            check.style.cssText = 'position:absolute; top:5px; right:5px; width:24px; height:24px; background:#ff4081; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px;';
+            card.appendChild(check);
+        }
+
         card.onclick = () => {
             if (isSelectMode) {
-                if (selectedImages.has(src)) { selectedImages.delete(src); card.classList.remove('selected'); }
-                else { selectedImages.add(src); card.classList.add('selected'); }
+                if (selectedImages.has(src)) selectedImages.delete(src);
+                else selectedImages.add(src);
                 document.getElementById('adv-sel-count').innerText = selectedImages.size;
+                renderGrid(); // 다시 그려서 체크표시 업데이트
             } else {
                 currentLightboxIndex = startIdx + idx;
                 document.getElementById('adv-lightbox-img').src = src;
@@ -178,12 +266,9 @@ function renderGrid() {
     });
 }
 
+// 이벤트 바인딩
 function bindEvents() {
     document.getElementById('adv-btn-close').onclick = () => document.getElementById('adv-gallery-popup').style.display = 'none';
-    document.getElementById('adv-btn-theme').onclick = () => {
-        isLightMode = !isLightMode;
-        document.getElementById('adv-gallery-popup').classList.toggle('adv-light-mode', isLightMode);
-    };
 
     document.getElementById('adv-char-select').onchange = (e) => loadAndSortImages(e.target.value);
     document.getElementById('adv-sort-select').onchange = () => loadAndSortImages(document.getElementById('adv-char-select').value);
@@ -192,13 +277,15 @@ function bindEvents() {
     document.getElementById('adv-btn-prev-page').onclick = () => { if(currentPage > 1) { currentPage--; renderGrid(); } };
     document.getElementById('adv-btn-next-page').onclick = () => { if(currentPage < Math.ceil(currentImages.length/itemsPerPage)) { currentPage++; renderGrid(); } };
 
+    // 다중 선택 버튼 토글
     document.getElementById('adv-btn-select').onclick = (e) => {
         isSelectMode = !isSelectMode;
-        e.target.style.background = isSelectMode ? (isLightMode ? '#ccc' : '#555') : '';
+        e.currentTarget.style.background = isSelectMode ? 'rgba(255,64,129,0.5)' : 'rgba(255,255,255,0.1)';
         document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
         selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0'; renderGrid();
     };
 
+    // 액션 버튼
     document.getElementById('adv-btn-sel-all').onclick = () => {
         currentImages.forEach(src => selectedImages.add(src));
         document.getElementById('adv-sel-count').innerText = selectedImages.size; renderGrid();
@@ -212,6 +299,7 @@ function bindEvents() {
         });
     };
 
+    // 라이트박스 닫기 및 이동
     document.getElementById('adv-nav-left').onclick = (e) => { e.stopPropagation(); navLightbox(-1); };
     document.getElementById('adv-nav-right').onclick = (e) => { e.stopPropagation(); navLightbox(1); };
     document.getElementById('adv-lightbox').onclick = (e) => { if(e.target.id === 'adv-lightbox') e.target.style.display = 'none'; };
@@ -224,12 +312,12 @@ function bindEvents() {
             const res = await fetch('/api/images/extract', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ avatar: imgSrc.split('/').pop() })
+                body: JSON.stringify({ avatar: imgSrc.split('/').pop() }) // 파일명만 전송
             });
             let promptText = "";
             if (res.ok) {
                 const metadata = await res.json();
-                promptText = metadata.prompt || metadata.description || "메타데이터가 없습니다.";
+                promptText = metadata.prompt || metadata.description || "메타데이터가 존재하지 않습니다.";
             } else {
                 promptText = "메타데이터를 가져오지 못했습니다.";
             }
@@ -251,14 +339,18 @@ function navLightbox(dir) {
 
 async function deleteTargetImages(targetArray) {
     const toDelete = targetArray.filter(src => !favoriteImages.has(src));
-    if (toDelete.length === 0) return alert("삭제할 이미지가 없거나 모두 즐겨찾기로 보호되어 있습니다.");
+    if (toDelete.length === 0) return alert("삭제할 이미지가 없거나 모두 ⭐ 즐겨찾기로 보호되어 있습니다.");
 
     if (!confirm(`즐겨찾기된 이미지를 제외한 ${toDelete.length}장을 영구 삭제합니다. 진행할까요?`)) return;
 
     for (let src of toDelete) {
         await fetch('/api/images/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: src}) });
+        
+        // 캐싱 데이터에서도 삭제
         currentImages = currentImages.filter(img => img !== src);
+        allImagePaths = allImagePaths.filter(img => img !== src);
     }
+    
     selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0';
     renderGrid();
     calculateTotalSize(currentImages);
