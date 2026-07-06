@@ -1,7 +1,6 @@
 import { getContext } from '../../../extensions.js';
 
-let allImagePaths = []; // 서버에서 불러온 전체 이미지 캐싱
-let currentImages = []; // 선택된 캐릭터의 이미지
+let currentImages = []; // 현재 선택된 캐릭터의 이미지들
 let selectedImages = new Set();
 let favoriteImages = new Set(JSON.parse(localStorage.getItem('advGalleryFavs')) || []);
 let isSelectMode = false;
@@ -66,6 +65,9 @@ const template = `
 </div>
 `;
 
+// 갤러리 캐싱용 전역 변수
+window.advGalleryCache = {};
+
 // 메뉴 추가 함수
 function addWandMenuButtons() {
     var menu = document.getElementById('extensionsMenu');
@@ -75,7 +77,7 @@ function addWandMenuButtons() {
         var btn = document.createElement('div');
         btn.id = 'adv-gallery-menu-btn';
         btn.className = 'list-group-item flex-container flexGap5';
-        btn.innerHTML = '<div class="fa-solid fa-images extensionsMenuExtensionButton" style="color:#ff4081;"></div><span>갤러리</span>';
+        btn.innerHTML = '<div class="fa-solid fa-images extensionsMenuExtensionButton"></div><span>갤러리</span>';
 
         btn.addEventListener('click', async function () {
             document.getElementById('adv-gallery-popup').style.display = 'flex';
@@ -87,108 +89,91 @@ function addWandMenuButtons() {
     }
 }
 
-// 전체 이미지 스캔 및 이미지가 있는 캐릭터(최근순) 필터링
+// 실리태번 원본 갤러리 API와 완벽 호환되는 방식으로 이미지 불러오기
 async function fetchAllImagesAndPopulateChars() {
     const select = document.getElementById('adv-char-select');
-    select.innerHTML = '<option value="">데이터 분석 중...</option>';
+    select.innerHTML = '<option value="">폴더 스캔 중...</option>';
+
+    const context = getContext();
+    if (!context.characters || context.characters.length === 0) {
+        select.innerHTML = '<option value="">캐릭터가 없습니다</option>';
+        return;
+    }
 
     try {
-        const res = await fetch('/api/images/get');
-        
-        // 서버 응답이 정상이 아닐 경우 방어
-        if (!res.ok) throw new Error("이미지 API를 불러오지 못했습니다.");
-        
-        const data = await res.json();
-        allImagePaths = Array.isArray(data) ? data : (data.images || []);
+        // 병렬로 모든 캐릭터의 이미지 폴더를 스캔합니다 (ST POST API 규격 준수)
+        const fetchPromises = context.characters.map(async (c) => {
+            try {
+                const res = await fetch('/api/images/get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ avatar: c.avatar, ch_name: c.name })
+                });
 
-        let folderLastIndexMap = {}; 
-        
-        // 경로에서 폴더명 추출 및 가장 최근(배열 뒤쪽) 인덱스 기록
-        allImagePaths.forEach((path, idx) => {
-            if (typeof path !== 'string') return; // 경로가 텍스트가 아니면 무시 (방어 로직)
-            const normalizedPath = path.replace(/\\/g, '/');
-            const match = normalizedPath.match(/\/images\/([^/]+)\//i);
-            if (match) {
-                folderLastIndexMap[match[1]] = idx; 
-            }
+                if (res.ok) {
+                    const data = await res.json();
+                    const images = Array.isArray(data) ? data : (data.images || []);
+                    if (images.length > 0) {
+                        return {
+                            name: c.name,
+                            avatar: c.avatar,
+                            images: images,
+                            // 최신 이미지(보통 배열의 마지막 요소)를 저장해 정렬 기준으로 사용
+                            lastImageName: images[images.length - 1] 
+                        };
+                    }
+                }
+            } catch (err) { }
+            return null;
         });
 
-        const context = getContext();
-        let validChars = [];
-
-        // 존재하는 캐릭터와 이미지 폴더 매칭
-        if (context.characters && Array.isArray(context.characters)) {
-            context.characters.forEach(c => {
-                // 아바타나 이름이 비어있을(null) 경우를 대비한 안전장치 추가
-                const avatarFile = c.avatar || ""; 
-                const charName = c.name || "Unknown";
-                const avatarBase = avatarFile.replace(/\.[^/.]+$/, ""); 
-
-                let matchedFolder = null;
-                
-                // 폴더 이름 매칭 로직
-                if (avatarBase && folderLastIndexMap[avatarBase] !== undefined) {
-                    matchedFolder = avatarBase;
-                } else if (charName && folderLastIndexMap[charName] !== undefined) {
-                    matchedFolder = charName;
-                } else {
-                    const keys = Object.keys(folderLastIndexMap);
-                    matchedFolder = keys.find(k => 
-                        (avatarBase && k.toLowerCase() === avatarBase.toLowerCase()) || 
-                        (charName && k.toLowerCase() === charName.toLowerCase())
-                    );
-                }
-
-                if (matchedFolder) {
-                    validChars.push({
-                        name: charName,
-                        folder: matchedFolder,
-                        lastIdx: folderLastIndexMap[matchedFolder]
-                    });
-                }
-            });
-        }
-
-        // 인덱스 내림차순(가장 최근에 이미지가 추가된 순) 정렬
-        validChars.sort((a, b) => b.lastIdx - a.lastIdx);
+        // 스캔 결과 합치기
+        const results = await Promise.all(fetchPromises);
+        const validChars = results.filter(r => r !== null);
 
         if (validChars.length === 0) {
             select.innerHTML = '<option value="">이미지가 있는 캐릭터 없음</option>';
             return;
         }
 
+        // 가장 최근에 이미지가 추가된 캐릭터 순으로 정렬 (문자열 역순 비교)
+        validChars.sort((a, b) => b.lastImageName.localeCompare(a.lastImageName));
+
+        // 데이터 캐싱 및 드롭다운 생성
         select.innerHTML = '<option value="">👤 캐릭터 선택</option>';
+        window.advGalleryCache = {}; 
+
         validChars.forEach(c => {
-            select.innerHTML += `<option value="${c.folder}">${c.name}</option>`;
+            window.advGalleryCache[c.avatar] = c.images; // 아바타 파일명을 키(Key)로 캐싱
+            select.innerHTML += `<option value="${c.avatar}">${c.name}</option>`;
         });
 
     } catch (e) {
-        // 에러가 났을 때 F12 개발자 도구에 상세 이유를 띄움
-        console.error("갤러리 로딩 중 오류 발생:", e);
+        console.error("갤러리 스캔 중 오류:", e);
         select.innerHTML = '<option value="">오류 발생 (F12 콘솔 확인)</option>';
     }
 }
 
-// 선택된 캐릭터 폴더의 이미지만 로드 및 정렬
-function loadAndSortImages(folderName) {
+// 선택된 캐릭터 이미지를 화면에 띄우기
+function loadAndSortImages(avatarName) {
     document.getElementById('adv-char-size').innerText = '';
-    if (!folderName) { currentImages = []; renderGrid(); return; }
+    
+    // 캐싱된 배열에서 복사해오기
+    if (!avatarName || !window.advGalleryCache[avatarName]) { 
+        currentImages = []; 
+        renderGrid(); 
+        return; 
+    }
 
-    // 캐싱된 전체 이미지에서 해당 폴더명 추출
-    currentImages = allImagePaths.filter(path => {
-        if (typeof path !== 'string') return false;
-        const normalizedPath = path.replace(/\\/g, '/');
-        return normalizedPath.includes(`/images/${folderName}/`);
-    });
-
+    currentImages = [...window.advGalleryCache[avatarName]];
     const sortType = document.getElementById('adv-sort-select').value;
     
-    // 기본적으로 ST api는 생성순(오래된순)으로 줌
     if (sortType === 'newest') currentImages.reverse();
-    else if (sortType === 'oldest') { /* 그대로 유지 */ }
+    else if (sortType === 'oldest') { /* ST 기본값이 oldest 이므로 그대로 유지 */ }
     else if (sortType === 'size') currentImages.sort((a, b) => b.length - a.length);
 
     currentPage = 1;
+    resetSelection();
     renderGrid();
     calculateTotalSize(currentImages);
 }
@@ -281,6 +266,11 @@ function renderGrid() {
     });
 }
 
+function resetSelection() {
+    selectedImages.clear();
+    document.getElementById('adv-sel-count').innerText = '0';
+}
+
 // 이벤트 바인딩
 function bindEvents() {
     document.getElementById('adv-btn-close').onclick = () => document.getElementById('adv-gallery-popup').style.display = 'none';
@@ -297,7 +287,7 @@ function bindEvents() {
         isSelectMode = !isSelectMode;
         e.currentTarget.style.background = isSelectMode ? 'rgba(255,64,129,0.5)' : 'rgba(255,255,255,0.1)';
         document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
-        selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0'; renderGrid();
+        resetSelection(); renderGrid();
     };
 
     // 액션 버튼
@@ -327,7 +317,7 @@ function bindEvents() {
             const res = await fetch('/api/images/extract', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ avatar: imgSrc.split('/').pop() }) // 파일명만 전송
+                body: JSON.stringify({ avatar: imgSrc.split('/').pop() })
             });
             let promptText = "";
             if (res.ok) {
@@ -361,12 +351,17 @@ async function deleteTargetImages(targetArray) {
     for (let src of toDelete) {
         await fetch('/api/images/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: src}) });
         
-        // 캐싱 데이터에서도 삭제
+        // 현재 리스트에서 삭제
         currentImages = currentImages.filter(img => img !== src);
-        allImagePaths = allImagePaths.filter(img => img !== src);
+        
+        // 캐싱된 전체 데이터에서도 즉시 삭제해줘야 캐릭터를 다시 눌렀을 때 부활하지 않음
+        const currentAvatar = document.getElementById('adv-char-select').value;
+        if(currentAvatar && window.advGalleryCache[currentAvatar]) {
+            window.advGalleryCache[currentAvatar] = window.advGalleryCache[currentAvatar].filter(img => img !== src);
+        }
     }
     
-    selectedImages.clear(); document.getElementById('adv-sel-count').innerText = '0';
+    resetSelection();
     renderGrid();
     calculateTotalSize(currentImages);
     alert('삭제 완료!');
