@@ -1,14 +1,12 @@
-// 1. 에러를 뿜게 만들었던 부분을 빼고 딱 2개만 안전하게 가져옵니다.
 import { getContext, extension_settings } from '../../../extensions.js';
 
-let originalImages = []; 
-let currentImages = []; 
+let originalImages = [];
+let currentImages = [];
 let selectedImages = new Set();
-let favoriteImages = new Set(); // 안전한 로딩을 위해 일단 비워둠
+let favoriteImages = new Set();
 let isSelectMode = false;
 let currentPage = 1, itemsPerPage = 8, currentLightboxIndex = 0;
 
-// 2. 서버 저장 기능을 뻗지 않게 안전하게 우회해서 가져옵니다 (서버 저장 연동)
 let safeSaveSettings = () => {
     localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
 };
@@ -27,18 +25,18 @@ const template = `
 
     <div id="adv-gallery-controls">
         <div style="font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px;">
-            💬 현재 채팅 갤러리
+            🖼
         </div>
-        
+
         <select class="adv-ctrl-item" id="adv-sort-select" title="정렬">
-            <option value="newest">🕒 최신순</option>
-            <option value="oldest">⏳ 오래된순</option>
+            <option value="newest">최신순</option>
+            <option value="oldest">오래된순</option>
         </select>
-        
+
         <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수">
             <option value="4">🔲 4장 보기</option><option value="8" selected>🔲 8장 보기</option><option value="20">🔲 20장 보기</option>
         </select>
-        
+
         <div style="margin-left:auto; display:flex; gap:8px;">
             <button class="adv-ctrl-item" id="adv-btn-select" title="다중 선택 모드"><i class="fa-solid fa-check-double"></i></button>
         </div>
@@ -92,7 +90,7 @@ function addWandMenuButtons() {
 function loadCurrentChatImages() {
     const container = document.getElementById('adv-gallery-container');
     const context = getContext();
-    
+
     if (!context.chat || context.chat.length === 0) {
         originalImages = [];
         currentImages = [];
@@ -129,9 +127,9 @@ function loadCurrentChatImages() {
 
 function applySortAndRender() {
     const sortType = document.getElementById('adv-sort-select').value;
-    
+
     currentImages = [...originalImages];
-    
+
     if (sortType === 'newest') {
         currentImages.reverse();
     }
@@ -139,14 +137,14 @@ function applySortAndRender() {
     currentPage = 1;
     selectedImages.clear();
     document.getElementById('adv-sel-count').innerText = '0';
-    
+
     renderGrid();
 }
 
 function renderGrid() {
     const container = document.getElementById('adv-gallery-container');
-    if(!currentImages || currentImages.length === 0) return;
-    
+    if (!currentImages || currentImages.length === 0) return;
+
     container.innerHTML = '';
     container.style.setProperty('--columns', itemsPerPage == 4 ? 2 : (itemsPerPage == 8 ? 4 : 6));
 
@@ -161,32 +159,27 @@ function renderGrid() {
         card.className = `adv-img-card ${selectedImages.has(src) ? 'selected' : ''}`;
 
         const favBtn = document.createElement('button');
-        favBtn.className = `adv-btn-fav ${favoriteImages.has(src) ? 'active' : ''}`;
-        favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
-        
-        // ★ 화면에 그려질 때 노란색/흰색 명확히 칠하기
-        favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white'; 
-        
+        const isFav = favoriteImages.has(src);
+        favBtn.className = `adv-btn-fav ${isFav ? 'active' : ''}`;
+        favBtn.innerHTML = isFav ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
+
         favBtn.onclick = (e) => {
             e.preventDefault();
-            e.stopPropagation(); // 뒤의 사진이 클릭되는 간섭 완벽 차단
-            
-            if (favoriteImages.has(src)) favoriteImages.delete(src); 
+            e.stopPropagation();
+
+            if (favoriteImages.has(src)) favoriteImages.delete(src);
             else favoriteImages.add(src);
-            
-            // 안전하게 연결된 서버 저장 함수 호출
+
             safeSaveSettings();
 
-            favBtn.classList.toggle('active');
-            favBtn.innerHTML = favoriteImages.has(src) ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
-            
-            // ★ 클릭하는 순간 즉시 노란색 <-> 흰색 토글
-            favBtn.style.color = favoriteImages.has(src) ? '#ffd54f' : 'white'; 
+            const nowFav = favoriteImages.has(src);
+            favBtn.classList.toggle('active', nowFav);
+            favBtn.innerHTML = nowFav ? '<i class="fa-solid fa-star"></i>' : '<i class="fa-regular fa-star"></i>';
         };
 
         const img = document.createElement('img');
         img.src = src;
-        
+
         card.appendChild(favBtn);
         card.appendChild(img);
 
@@ -198,7 +191,7 @@ function renderGrid() {
                     selectedImages.add(src);
                 }
                 document.getElementById('adv-sel-count').innerText = selectedImages.size;
-                renderGrid(); 
+                renderGrid();
             } else {
                 currentLightboxIndex = startIdx + idx;
                 document.getElementById('adv-lightbox-img').src = src;
@@ -218,53 +211,51 @@ function bindEvents() {
     };
 
     document.getElementById('adv-sort-select').onchange = () => {
-        if(originalImages.length > 0) applySortAndRender();
+        if (originalImages.length > 0) applySortAndRender();
     };
-    
+
     document.getElementById('adv-grid-select').onchange = (e) => { itemsPerPage = parseInt(e.target.value); renderGrid(); };
 
-    document.getElementById('adv-btn-prev-page').onclick = () => { if(currentPage > 1) { currentPage--; renderGrid(); } };
-    document.getElementById('adv-btn-next-page').onclick = () => { if(currentPage < Math.ceil(currentImages.length/itemsPerPage)) { currentPage++; renderGrid(); } };
+    document.getElementById('adv-btn-prev-page').onclick = () => { if (currentPage > 1) { currentPage--; renderGrid(); } };
+    document.getElementById('adv-btn-next-page').onclick = () => { if (currentPage < Math.ceil(currentImages.length / itemsPerPage)) { currentPage++; renderGrid(); } };
 
     document.getElementById('adv-btn-select').onclick = (e) => {
         isSelectMode = !isSelectMode;
-        // 선택 모드 활성화 시 블루 테마
         e.currentTarget.style.background = isSelectMode ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
         document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
-        selectedImages.clear(); 
-        document.getElementById('adv-sel-count').innerText = '0'; 
+        selectedImages.clear();
+        document.getElementById('adv-sel-count').innerText = '0';
         renderGrid();
     };
 
     document.getElementById('adv-btn-sel-all').onclick = () => {
         currentImages.forEach(src => selectedImages.add(src));
-        document.getElementById('adv-sel-count').innerText = selectedImages.size; 
+        document.getElementById('adv-sel-count').innerText = selectedImages.size;
         renderGrid();
     };
-    
+
     document.getElementById('adv-btn-del-sel').onclick = () => deleteTargetImages(Array.from(selectedImages));
-    
+
     document.getElementById('adv-btn-del-unsel').onclick = () => {
-        // 즐겨찾기(노란 별)가 안 된 이미지만 걸러서 삭제 목록으로 전달
         const toDelete = currentImages.filter(src => !favoriteImages.has(src));
         deleteTargetImages(toDelete);
     };
-    
+
     document.getElementById('adv-btn-save-sel').onclick = () => {
-        if(selectedImages.size === 0) return alert('저장할 이미지를 선택해주세요.');
+        if (selectedImages.size === 0) return alert('저장할 이미지를 선택해주세요.');
         selectedImages.forEach(src => {
-            const a = document.createElement('a'); 
-            a.href = src; 
+            const a = document.createElement('a');
+            a.href = src;
             a.download = src.split('/').pop();
-            document.body.appendChild(a); 
-            a.click(); 
+            document.body.appendChild(a);
+            a.click();
             document.body.removeChild(a);
         });
     };
 
     document.getElementById('adv-nav-left').onclick = (e) => { e.stopPropagation(); navLightbox(-1); };
     document.getElementById('adv-nav-right').onclick = (e) => { e.stopPropagation(); navLightbox(1); };
-    document.getElementById('adv-lightbox').onclick = (e) => { if(e.target.id === 'adv-lightbox') e.target.style.display = 'none'; };
+    document.getElementById('adv-lightbox').onclick = (e) => { if (e.target.id === 'adv-lightbox') e.target.style.display = 'none'; };
 }
 
 function navLightbox(dir) {
@@ -279,34 +270,48 @@ async function deleteTargetImages(targetArray) {
 
     if (!confirm(`총 ${targetArray.length}장의 이미지를 서버에서 완전히 삭제합니다. 진행할까요?`)) return;
 
-    const headers = typeof window.getRequestHeaders === 'function' 
-        ? window.getRequestHeaders() 
+    const headers = typeof window.getRequestHeaders === 'function'
+        ? window.getRequestHeaders()
         : { 'Content-Type': 'application/json', 'X-CSRF-Token': getContext().csrf_token };
+
+    let failCount = 0;
 
     for (let src of targetArray) {
         try {
-            // (핵심) 물리 파일이 진짜로 지워지도록 변수명을 url 로 수정
-            await fetch('/api/images/delete', { 
-                method: 'POST', 
-                headers: headers, 
-                body: JSON.stringify({ url: src }) 
+            const res = await fetch('/api/images/delete', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ url: src })
             });
+            if (!res.ok) {
+                const errText = await res.text();
+                console.error('삭제 실패:', src, res.status, errText);
+                failCount++;
+                continue;
+            }
             originalImages = originalImages.filter(img => img !== src);
             currentImages = currentImages.filter(img => img !== src);
-        } catch(e) { console.error(e); }
+        } catch (e) {
+            console.error('삭제 요청 에러:', e);
+            failCount++;
+        }
     }
-    
-    selectedImages.clear(); 
+
+    selectedImages.clear();
     document.getElementById('adv-sel-count').innerText = '0';
-    
+
     const totalPages = Math.ceil(currentImages.length / itemsPerPage) || 1;
     if (currentPage > totalPages) currentPage = totalPages;
-    
+
     renderGrid();
-    alert('삭제 완료!\n(서버에서 지워졌으므로, 채팅창의 엑박을 치우려면 메시지를 새로고침/수정해야 합니다.)');
+
+    if (failCount > 0) {
+        alert(`${targetArray.length - failCount}장 삭제 완료, ${failCount}장은 실패했습니다.\n콘솔(F12)에서 에러 내용을 확인해주세요.`);
+    } else {
+        alert('삭제 완료!\n(서버에서 지워졌으므로, 채팅창의 엑박을 치우려면 메시지를 새로고침/수정해야 합니다.)');
+    }
 }
 
-// 스크립트 실행 지점: 실리태번 UI 로딩 후 안전하게 서버 데이터를 끌어옵니다.
 jQuery(function () {
     let loadedFavs = [];
     if (extension_settings && extension_settings.advGalleryFavs) {
