@@ -139,6 +139,17 @@ select.adv-ctrl-item {
     max-width: 150px;
 }
 
+#adv-grid-custom-input {
+    height: 36px;
+    width: 64px;
+    padding: 0 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--SmartThemeBodyColor, #e8e8e8);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 8px;
+    font-size: 13px;
+}
+
 .adv-ctrl-item:hover { background: rgba(255, 255, 255, 0.12); }
 .adv-ctrl-item:active { transform: scale(0.96); }
 
