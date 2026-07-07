@@ -1,4 +1,5 @@
 import { getContext, extension_settings } from '../../../extensions.js';
+import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
 
 let originalImages = [];
 let currentImages = [];
@@ -7,30 +8,24 @@ let favoriteImages = new Set();
 let isSelectMode = false;
 let currentPage = 1, itemsPerPage = 8, currentLightboxIndex = 0;
 
-let safeSaveSettings = () => {
+function safeSaveSettings() {
+    if (extension_settings) extension_settings.advGalleryFavs = [...favoriteImages];
     localStorage.setItem('advGalleryFavs', JSON.stringify([...favoriteImages]));
-};
-import('../../../../script.js').then(module => {
-    if (module.saveSettingsDebounced) {
-        safeSaveSettings = () => {
-            if (extension_settings) extension_settings.advGalleryFavs = [...favoriteImages];
-            module.saveSettingsDebounced();
-        };
-    }
-}).catch(() => {});
+    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+}
 
 const template = `
 <div id="adv-gallery-popup">
     <button id="adv-btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
 
     <div id="adv-gallery-controls">
-        <div style="font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px;">
-            🖼
+        <div style="font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px; white-space:nowrap;">
+            🖼 <span id="adv-gallery-meta" style="color:#999; font-weight:normal; font-size:12px;">(0장, 0MB)</span>
         </div>
 
         <select class="adv-ctrl-item" id="adv-sort-select" title="정렬">
-            <option value="newest">최신순</option>
-            <option value="oldest">오래된순</option>
+            <option value="newest">🕒 최신순</option>
+            <option value="oldest">⏳ 오래된순</option>
         </select>
 
         <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수">
@@ -87,6 +82,37 @@ function addWandMenuButtons() {
     }, 500);
 }
 
+async function updateGalleryMeta(images) {
+    const metaSpan = document.getElementById('adv-gallery-meta');
+    if (!metaSpan) return;
+
+    if (images.length === 0) {
+        metaSpan.textContent = '(0장, 0MB)';
+        return;
+    }
+
+    metaSpan.textContent = `(${images.length}장, 계산 중...)`;
+
+    let totalSize = 0;
+    const chunkSize = 20;
+    try {
+        for (let i = 0; i < images.length; i += chunkSize) {
+            const chunk = images.slice(i, i + chunkSize);
+            await Promise.all(chunk.map(async (src) => {
+                try {
+                    const res = await fetch(src, { method: 'HEAD' });
+                    const size = res.headers.get('content-length');
+                    if (size) totalSize += parseInt(size, 10);
+                } catch (e) { /* skip unreadable entries */ }
+            }));
+        }
+        const mb = (totalSize / (1024 * 1024)).toFixed(1);
+        metaSpan.textContent = `(${images.length}장, ${mb}MB)`;
+    } catch (e) {
+        metaSpan.textContent = `(${images.length}장, 용량 계산 실패)`;
+    }
+}
+
 function loadCurrentChatImages() {
     const container = document.getElementById('adv-gallery-container');
     const context = getContext();
@@ -95,6 +121,7 @@ function loadCurrentChatImages() {
         originalImages = [];
         currentImages = [];
         container.innerHTML = '<p style="text-align:center; padding-top:40px; color:#aaa; grid-column:1/-1;">현재 채팅에 이미지가 없습니다.</p>';
+        updateGalleryMeta(originalImages);
         return;
     }
 
@@ -116,6 +143,7 @@ function loadCurrentChatImages() {
     });
 
     originalImages = Array.from(foundImages);
+    updateGalleryMeta(originalImages);
 
     if (originalImages.length === 0) {
         container.innerHTML = '<p style="text-align:center; padding-top:40px; color:#aaa; grid-column:1/-1;">현재 채팅에 갤러리에 표시될 이미지가 없습니다.</p>';
@@ -270,9 +298,7 @@ async function deleteTargetImages(targetArray) {
 
     if (!confirm(`총 ${targetArray.length}장의 이미지를 서버에서 완전히 삭제합니다. 진행할까요?`)) return;
 
-    const headers = typeof window.getRequestHeaders === 'function'
-        ? window.getRequestHeaders()
-        : { 'Content-Type': 'application/json', 'X-CSRF-Token': getContext().csrf_token };
+    const headers = getRequestHeaders();
 
     let failCount = 0;
 
