@@ -20,7 +20,7 @@ function safeSaveSettings() {
 
 const template = `
 <div id="adv-gallery-popup">
-    <button id="adv-btn-close" class="adv-icon-btn" title="닫기"><i class="fa-solid fa-xmark"></i></button>
+    <button id="adv-btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
 
     <div id="adv-gallery-controls">
         <div id="adv-btn-folder-picker" style="position:relative; font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px; cursor:pointer;">
@@ -43,7 +43,7 @@ const template = `
         <input type="number" id="adv-grid-custom-input" min="1" max="200" placeholder="장수" style="display:none;">
 
         <div style="margin-left:auto; display:flex; gap:8px;">
-            <button class="adv-ctrl-item adv-icon-btn" id="adv-btn-select" title="다중 선택 모드"><i class="fa-solid fa-check-double"></i></button>
+            <button class="adv-ctrl-item adv-icon-btn" id="adv-btn-select" title="다중 선택 모드"><i class="fa-solid fa-list-check"></i></button>
         </div>
     </div>
 
@@ -462,7 +462,7 @@ function bindEvents() {
     document.addEventListener('mousedown', (e) => {
         const picker = document.getElementById('adv-folder-picker');
         const pickerBtn = document.getElementById('adv-btn-folder-picker');
-        if (picker.style.display === 'block' && !pickerBtn.contains(e.target)) {
+        if (picker.style.display === 'block' && !picker.contains(e.target) && !pickerBtn.contains(e.target)) {
             picker.style.display = 'none';
         }
     });
