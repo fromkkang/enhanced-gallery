@@ -61,6 +61,16 @@
 #adv-gallery-controls::-webkit-scrollbar { height: 4px; }
 #adv-gallery-controls::-webkit-scrollbar-thumb { background: var(--SmartThemeBorderColor, #555); border-radius: 4px; }
 
+#adv-gallery-meta {
+    font-size: clamp(8px, 2.2vw, 12px) !important;
+}
+
+#adv-gallery-controls > div:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40vw;
+}
+
 .adv-ctrl-item {
     height: 32px;
     padding: 0 10px;
