@@ -116,10 +116,13 @@
     font-size: clamp(8px, 2.2vw, 12px) !important;
 }
 
-#adv-gallery-controls > div:first-child {
+.adv-folder-label {
+    display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 40vw;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 
 .adv-ctrl-item {
