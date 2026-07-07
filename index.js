@@ -23,8 +23,8 @@ const template = `
     <button id="adv-btn-close" class="adv-icon-btn" title="닫기"><i class="fa-solid fa-xmark"></i></button>
 
     <div id="adv-gallery-controls">
-        <div id="adv-btn-folder-picker" style="position:relative; font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px; white-space:nowrap; cursor:pointer;">
-            🖼 <span id="adv-gallery-folder-name"></span> <span id="adv-gallery-meta" style="color:#999; font-weight:normal; font-size:10px;">(0장, 0MB)</span> <span style="font-size:10px; opacity:0.6;">▾</span> <i class="fa-solid fa-chevron-down" style="font-size:9px; opacity:0.6;"></i>
+        <div id="adv-btn-folder-picker" style="position:relative; font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px; cursor:pointer;">
+            <span class="adv-folder-label">🖼 <span id="adv-gallery-folder-name"></span> <span id="adv-gallery-meta" style="color:#999; font-weight:normal; font-size:10px;">(0장, 0MB)</span> <i class="fa-solid fa-chevron-down" style="font-size:9px; opacity:0.6;"></i></span>
 
             <div id="adv-folder-picker" style="display:none;">
                 <input type="text" id="adv-folder-search" placeholder="캐릭터 검색..." onclick="event.stopPropagation()">
@@ -168,7 +168,7 @@ function renderFolderList(filtered) {
 
     const homeItem = document.createElement('div');
     homeItem.className = 'adv-folder-item';
-    homeItem.innerHTML = '현재 채팅 캐릭터로';
+    homeItem.innerHTML = '🏠 현재 캐릭터로';
     homeItem.onclick = () => {
         currentFolder = null;
         document.getElementById('adv-folder-picker').style.display = 'none';
