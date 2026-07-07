@@ -1,6 +1,7 @@
 import { getContext, extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
 import { MEDIA_REQUEST_TYPE } from '../../../constants.js';
+import { Popup } from '../../../popup.js';
 
 let originalImages = [];
 let currentImages = [];
@@ -19,11 +20,11 @@ function safeSaveSettings() {
 
 const template = `
 <div id="adv-gallery-popup">
-    <button id="adv-btn-close" title="닫기"><i class="fa-solid fa-xmark"></i></button>
+    <button id="adv-btn-close" class="adv-icon-btn" title="닫기"><i class="fa-solid fa-xmark"></i></button>
 
     <div id="adv-gallery-controls">
         <div id="adv-btn-folder-picker" style="position:relative; font-weight:bold; color:var(--SmartThemeBodyColor); padding:5px 10px; background:rgba(255,255,255,0.05); border-radius:5px; white-space:nowrap; cursor:pointer;">
-            🖼 <span id="adv-gallery-folder-name"></span> <span id="adv-gallery-meta" style="color:#999; font-weight:normal; font-size:10px;">(0장, 0MB)</span>
+            🖼 <span id="adv-gallery-folder-name"></span> <span id="adv-gallery-meta" style="color:#999; font-weight:normal; font-size:10px;">(0장, 0MB)</span> <span style="font-size:10px; opacity:0.6;">▾</span> <i class="fa-solid fa-chevron-down" style="font-size:9px; opacity:0.6;"></i>
 
             <div id="adv-folder-picker" style="display:none;">
                 <input type="text" id="adv-folder-search" placeholder="캐릭터 검색..." onclick="event.stopPropagation()">
@@ -32,38 +33,40 @@ const template = `
         </div>
 
         <select class="adv-ctrl-item" id="adv-sort-select" title="정렬">
-            <option value="newest">최신순</option>
-            <option value="oldest">오래된순</option>
+            <option value="newest">🕒 최신순</option>
+            <option value="oldest">⏳ 오래된순</option>
         </select>
 
         <select class="adv-ctrl-item" id="adv-grid-select" title="화면 표시 장수">
-            <option value="4">4장</option><option value="8" selected>8장</option><option value="20">20장</option>
+            <option value="4">🔲 4장 보기</option><option value="8" selected>🔲 8장 보기</option><option value="20">🔲 20장 보기</option>
         </select>
 
         <div style="margin-left:auto; display:flex; gap:8px;">
-            <button class="adv-ctrl-item" id="adv-btn-select" title="다중 선택 모드"><i class="fa-solid fa-check-double"></i></button>
+            <button class="adv-ctrl-item adv-icon-btn" id="adv-btn-select" title="다중 선택 모드"><i class="fa-solid fa-check-double"></i></button>
         </div>
     </div>
 
     <div id="adv-selection-actions">
         <button class="adv-ctrl-item" id="adv-btn-sel-all"><i class="fa-solid fa-check-square"></i> 전체선택</button>
         <button class="adv-ctrl-item" id="adv-btn-del-sel"><i class="fa-solid fa-trash"></i> 선택삭제(<span id="adv-sel-count">0</span>)</button>
-        <button class="adv-ctrl-item" id="adv-btn-del-unsel"><i class="fa-solid fa-star"></i> ★제외삭제</button>
+        <button class="adv-ctrl-item" id="adv-btn-del-unsel" title="즐겨찾기(별) 표시하지 않은 이미지만 전부 삭제합니다"><i class="fa-solid fa-star"></i> 즐겨찾기 제외 삭제</button>
         <button class="adv-ctrl-item" id="adv-btn-save-sel"><i class="fa-solid fa-download"></i> 선택저장</button>
     </div>
 
     <div id="adv-gallery-container"></div>
 
     <div id="adv-pagination">
-        <button class="adv-ctrl-item" id="adv-btn-prev-page"><i class="fa-solid fa-chevron-left"></i></button>
-        <span id="adv-page-info">1 / 1</span>
-        <button class="adv-ctrl-item" id="adv-btn-next-page"><i class="fa-solid fa-chevron-right"></i></button>
+        <button class="adv-ctrl-item adv-icon-btn" id="adv-btn-prev-page"><i class="fa-solid fa-chevron-left"></i></button>
+        <input type="number" id="adv-page-input" min="1" value="1">
+        <span id="adv-page-total">/ 1</span>
+        <button class="adv-ctrl-item adv-icon-btn" id="adv-btn-next-page"><i class="fa-solid fa-chevron-right"></i></button>
     </div>
 </div>
 
 <div id="adv-lightbox">
     <button class="adv-nav-btn" id="adv-nav-left"><i class="fa-solid fa-chevron-left"></i></button>
     <img id="adv-lightbox-img" src="">
+    <div id="adv-lightbox-counter"></div>
     <button class="adv-nav-btn" id="adv-nav-right"><i class="fa-solid fa-chevron-right"></i></button>
 </div>
 `;
@@ -130,7 +133,29 @@ async function fetchFolderList() {
             headers: getRequestHeaders({ omitContentType: true }),
         });
         if (!res.ok) return [];
-        allFoldersCache = await res.json();
+        const rawFolders = await res.json();
+
+        const withCounts = await Promise.all(rawFolders.map(async (folder) => {
+            try {
+                const listRes = await fetch('/api/images/list', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({
+                        folder: folder,
+                        sortField: 'date',
+                        sortOrder: 'desc',
+                        type: MEDIA_REQUEST_TYPE.IMAGE,
+                    }),
+                });
+                if (!listRes.ok) return null;
+                const files = await listRes.json();
+                return files.length > 0 ? folder : null;
+            } catch (e) {
+                return null;
+            }
+        }));
+
+        allFoldersCache = withCounts.filter(Boolean);
         return allFoldersCache;
     } catch (e) {
         console.error('폴더 목록 조회 실패:', e);
@@ -224,6 +249,8 @@ async function loadCharacterFolderImages() {
     const folderNameEl = document.getElementById('adv-gallery-folder-name');
     if (folderNameEl) folderNameEl.textContent = folder;
 
+    container.innerHTML = '<div class="adv-spinner" style="grid-column:1/-1;"></div>';
+
     const sortType = document.getElementById('adv-sort-select').value;
     const sortOrder = sortType === 'oldest' ? 'asc' : 'desc';
 
@@ -278,7 +305,9 @@ function renderGrid() {
     container.style.setProperty('--columns', itemsPerPage == 4 ? 2 : (itemsPerPage == 8 ? 4 : 6));
 
     const totalPages = Math.ceil(currentImages.length / itemsPerPage) || 1;
-    document.getElementById('adv-page-info').textContent = `${currentPage} / ${totalPages}`;
+    document.getElementById('adv-page-input').value = currentPage;
+    document.getElementById('adv-page-input').max = totalPages;
+    document.getElementById('adv-page-total').textContent = `/ ${totalPages}`;
 
     const startIdx = (currentPage - 1) * itemsPerPage;
     const pageImages = currentImages.slice(startIdx, startIdx + itemsPerPage);
@@ -329,8 +358,7 @@ function renderGrid() {
                 renderGrid();
             } else {
                 currentLightboxIndex = startIdx + idx;
-                document.getElementById('adv-lightbox-img').src = src;
-                document.getElementById('adv-lightbox').style.display = 'flex';
+                openLightbox();
             }
         };
         container.appendChild(card);
@@ -346,7 +374,7 @@ function bindEvents() {
     document.getElementById('adv-btn-close').onclick = () => {
         document.getElementById('adv-gallery-popup').style.display = 'none';
         isSelectMode = false;
-        document.getElementById('adv-btn-select').style.background = 'rgba(255,255,255,0.1)';
+        document.getElementById('adv-btn-select').classList.remove('active');
         document.getElementById('adv-selection-actions').style.display = 'none';
     };
 
@@ -359,9 +387,17 @@ function bindEvents() {
     document.getElementById('adv-btn-prev-page').onclick = () => { if (currentPage > 1) { currentPage--; renderGrid(); } };
     document.getElementById('adv-btn-next-page').onclick = () => { if (currentPage < Math.ceil(currentImages.length / itemsPerPage)) { currentPage++; renderGrid(); } };
 
+    document.getElementById('adv-page-input').addEventListener('change', (e) => {
+        const totalPages = Math.ceil(currentImages.length / itemsPerPage) || 1;
+        let target = parseInt(e.target.value, 10) || 1;
+        target = Math.min(Math.max(target, 1), totalPages);
+        currentPage = target;
+        renderGrid();
+    });
+
     document.getElementById('adv-btn-select').onclick = (e) => {
         isSelectMode = !isSelectMode;
-        e.currentTarget.style.background = isSelectMode ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)';
+        e.currentTarget.classList.toggle('active', isSelectMode);
         document.getElementById('adv-selection-actions').style.display = isSelectMode ? 'flex' : 'none';
         selectedImages.clear();
         document.getElementById('adv-sel-count').innerText = '0';
@@ -382,7 +418,7 @@ function bindEvents() {
     };
 
     document.getElementById('adv-btn-save-sel').onclick = () => {
-        if (selectedImages.size === 0) return alert('저장할 이미지를 선택해주세요.');
+        if (selectedImages.size === 0) { toastr.warning('저장할 이미지를 선택해주세요.'); return; }
         selectedImages.forEach(src => {
             const a = document.createElement('a');
             a.href = src;
@@ -416,6 +452,39 @@ function bindEvents() {
             document.getElementById('adv-btn-close').click();
         }
     });
+
+    let touchStartX = 0;
+    const lightbox = document.getElementById('adv-lightbox');
+    lightbox.addEventListener('touchstart', (e) => {
+        touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
+    lightbox.addEventListener('touchend', (e) => {
+        const touchEndX = e.changedTouches[0].screenX;
+        const delta = touchEndX - touchStartX;
+        if (Math.abs(delta) > 50) {
+            navLightbox(delta < 0 ? 1 : -1);
+        }
+    }, { passive: true });
+
+    document.addEventListener('keydown', (e) => {
+        const lightboxOpen = lightbox.style.display === 'flex';
+        const popupOpen = document.getElementById('adv-gallery-popup').style.display === 'flex';
+
+        if (e.key === 'Escape') {
+            if (lightboxOpen) lightbox.style.display = 'none';
+            else if (popupOpen) document.getElementById('adv-btn-close').click();
+        } else if (lightboxOpen && e.key === 'ArrowLeft') {
+            navLightbox(-1);
+        } else if (lightboxOpen && e.key === 'ArrowRight') {
+            navLightbox(1);
+        }
+    });
+}
+
+function openLightbox() {
+    document.getElementById('adv-lightbox-img').src = currentImages[currentLightboxIndex];
+    document.getElementById('adv-lightbox-counter').textContent = `${currentLightboxIndex + 1} / ${currentImages.length}`;
+    document.getElementById('adv-lightbox').style.display = 'flex';
 }
 
 function navLightbox(dir) {
@@ -423,12 +492,17 @@ function navLightbox(dir) {
     if (currentLightboxIndex < 0) currentLightboxIndex = currentImages.length - 1;
     if (currentLightboxIndex >= currentImages.length) currentLightboxIndex = 0;
     document.getElementById('adv-lightbox-img').src = currentImages[currentLightboxIndex];
+    document.getElementById('adv-lightbox-counter').textContent = `${currentLightboxIndex + 1} / ${currentImages.length}`;
 }
 
 async function deleteTargetImages(targetArray) {
-    if (targetArray.length === 0) return alert("삭제 대상 이미지가 없습니다.\n(모두 즐겨찾기로 보호되어 있을 수 있습니다.)");
+    if (targetArray.length === 0) {
+        toastr.warning('삭제 대상 이미지가 없습니다. (모두 즐겨찾기로 보호되어 있을 수 있습니다.)');
+        return;
+    }
 
-    if (!confirm(`총 ${targetArray.length}장의 이미지를 서버에서 완전히 삭제합니다. 진행할까요?`)) return;
+    const confirmed = await Popup.show.confirm(`총 ${targetArray.length}장의 이미지를 서버에서 완전히 삭제합니다. 진행할까요?`, '이미지 삭제');
+    if (!confirmed) return;
 
     const headers = getRequestHeaders();
 
@@ -462,11 +536,12 @@ async function deleteTargetImages(targetArray) {
     if (currentPage > totalPages) currentPage = totalPages;
 
     renderGrid();
+    updateGalleryMeta(originalImages);
 
     if (failCount > 0) {
-        alert(`${targetArray.length - failCount}장 삭제 완료, ${failCount}장은 실패했습니다.\n콘솔(F12)에서 에러 내용을 확인해주세요.`);
+        toastr.error(`${targetArray.length - failCount}장 삭제 완료, ${failCount}장은 실패했습니다. (콘솔 확인)`);
     } else {
-        alert('삭제 완료!\n(서버에서 지워졌으므로, 채팅창의 엑박을 치우려면 메시지를 새로고침/수정해야 합니다.)');
+        toastr.success('삭제 완료! 채팅창의 엑박을 치우려면 메시지를 새로고침/수정해야 합니다.');
     }
 }
 
